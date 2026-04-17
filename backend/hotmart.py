@@ -25,10 +25,12 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 logger = logging.getLogger("hotmart_agent.module2")
 
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
-HOTMART_CLIENT_ID = os.environ.get("HOTMART_CLIENT_ID")
-HOTMART_CLIENT_SECRET = os.environ.get("HOTMART_CLIENT_SECRET")
-HOTMART_BASIC_AUTH = os.environ.get("HOTMART_BASIC_AUTH")
+
+def _env(name: str) -> Optional[str]:
+    """Read env var lazily so dotenv-loaded values are always picked up."""
+    val = os.environ.get(name)
+    return val.strip() if val else val
+
 
 SCRAPER_DELAY_MIN = 2.5
 SCRAPER_DELAY_MAX = 5.0
@@ -36,7 +38,7 @@ AFFILIATE_API_DELAY = 1.2
 
 
 def hotmart_credentials_configured() -> bool:
-    return all([HOTMART_CLIENT_ID, HOTMART_CLIENT_SECRET, HOTMART_BASIC_AUTH])
+    return all([_env("HOTMART_CLIENT_ID"), _env("HOTMART_CLIENT_SECRET"), _env("HOTMART_BASIC_AUTH")])
 
 
 # ========== Marketplace Scraper ==========
@@ -181,7 +183,8 @@ class HotmartMarketplaceScraper:
 # ========== LLM Fallback (Claude Sonnet 4.5) ==========
 async def llm_generate_products(pain_points: List[Dict[str, Any]], country_code: str, country_name: str, limit: int = 8) -> List[Dict]:
     """Generate plausible Hotmart-style products using Claude when scraping fails."""
-    if not EMERGENT_LLM_KEY:
+    emergent_key = _env("EMERGENT_LLM_KEY")
+    if not emergent_key:
         return _deterministic_products(pain_points, country_code, limit)
 
     pp_text = "\n".join(
@@ -212,7 +215,7 @@ async def llm_generate_products(pain_points: List[Dict[str, Any]], country_code:
 
     try:
         chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
+            api_key=emergent_key,
             session_id=f"products-{country_code}-{uuid.uuid4().hex[:8]}",
             system_message=system_message,
         ).with_model("anthropic", "claude-sonnet-4-5-20250929")
@@ -293,7 +296,8 @@ def _deterministic_products(pain_points: List[Dict[str, Any]], country_code: str
 
 # ========== Affiliate API Client ==========
 class HotmartAffiliateAPI:
-    BASE_URL = "https://api.hotmart.com"
+    BASE_URL = "https://api-sec-vlc.hotmart.com"
+    API_URL = "https://developers.hotmart.com"
 
     def __init__(self):
         self._token: Optional[str] = None
@@ -311,17 +315,20 @@ class HotmartAffiliateAPI:
     async def _get_token(self) -> str:
         if self._token and self._token_expires and datetime.now(timezone.utc) < self._token_expires:
             return self._token
+        client_id = _env("HOTMART_CLIENT_ID")
+        client_secret = _env("HOTMART_CLIENT_SECRET")
+        basic_auth = _env("HOTMART_BASIC_AUTH")
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
                 f"{self.BASE_URL}/security/oauth/token",
                 headers={
-                    "Authorization": f"Basic {HOTMART_BASIC_AUTH}",
+                    "Authorization": f"Basic {basic_auth}",
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
                 data={
                     "grant_type": "client_credentials",
-                    "client_id": HOTMART_CLIENT_ID,
-                    "client_secret": HOTMART_CLIENT_SECRET,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
                 },
             )
             resp.raise_for_status()
@@ -338,7 +345,7 @@ class HotmartAffiliateAPI:
             token = await self._get_token()
         except Exception as e:
             return {"error": f"auth_failed: {e}", "status": "auth_failed"}
-        url = f"{self.BASE_URL}/affiliation/v2/affiliates/products/{product_id}/hotlinks"
+        url = f"{self.API_URL}/affiliation/v2/affiliates/products/{product_id}/hotlinks"
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
                 url,
@@ -349,12 +356,29 @@ class HotmartAffiliateAPI:
                 json={"source": "super_agent", "campaign": "auto_match"},
             )
             if resp.status_code == 403:
-                return {"error": "No eres afiliado aprobado de este producto", "status": "not_affiliated"}
+                try:
+                    body = resp.json()
+                    desc = body.get("error_description") or body.get("error") or "Permiso denegado"
+                except Exception:
+                    desc = "Permiso denegado por Hotmart"
+                return {
+                    "error": desc,
+                    "status": "unauthorized_client",
+                    "hint": "Tu app Hotmart necesita scopes de afiliación. Revisa en developers.hotmart.com > Tu App > Permissions.",
+                }
             if resp.status_code == 404:
-                return {"error": "Producto no encontrado en Hotmart", "status": "not_found"}
+                return {"error": "Producto no encontrado o endpoint no disponible", "status": "not_found"}
             if resp.status_code >= 400:
-                return {"error": f"hotmart_api_error:{resp.status_code}", "status": "api_error"}
-            data = resp.json()
+                try:
+                    body = resp.json()
+                    desc = body.get("error_description") or body.get("message") or str(body)
+                except Exception:
+                    desc = f"HTTP {resp.status_code}"
+                return {"error": desc, "status": f"api_error_{resp.status_code}"}
+            try:
+                data = resp.json()
+            except Exception:
+                return {"error": "Hotmart devolvió respuesta no-JSON", "status": "invalid_response"}
             return {
                 "hotlink": data.get("hotlink") or data.get("url"),
                 "tracking_id": data.get("trackingId") or data.get("affiliateCode"),
@@ -362,6 +386,58 @@ class HotmartAffiliateAPI:
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "status": "generated",
             }
+
+    async def test_connection(self) -> Dict[str, Any]:
+        """Verifica credenciales + permisos llamando al OAuth y a un endpoint de prueba."""
+        if not hotmart_credentials_configured():
+            return self.credentials_missing_response()
+        try:
+            token = await self._get_token()
+        except httpx.HTTPStatusError as e:
+            try:
+                body = e.response.json()
+            except Exception:
+                body = {}
+            return {
+                "status": "auth_failed",
+                "error": body.get("error_description", str(e)),
+                "http_status": e.response.status_code,
+            }
+        except Exception as e:
+            return {"status": "auth_failed", "error": str(e)}
+
+        # Token OK — probe scopes by calling a permission-gated endpoint
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{self.API_URL}/payments/api/v1/sales/history",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"max_results": 1},
+            )
+            if resp.status_code == 200:
+                scopes_ok = True
+                scope_detail = "Todos los scopes funcionan"
+            elif resp.status_code == 403:
+                scopes_ok = False
+                try:
+                    body = resp.json()
+                    scope_detail = body.get("error_description", "Permiso denegado")
+                except Exception:
+                    scope_detail = "Permiso denegado"
+            else:
+                scopes_ok = False
+                scope_detail = f"HTTP {resp.status_code}"
+
+        return {
+            "status": "ok" if scopes_ok else "oauth_ok_scopes_missing",
+            "oauth_token": "valid",
+            "scopes_ok": scopes_ok,
+            "scope_detail": scope_detail,
+            "next_step": None if scopes_ok else (
+                "Tu token OAuth funciona, pero tu app no tiene permisos de afiliación. "
+                "Ve a developers.hotmart.com > Tu App > Permissions y activa los scopes "
+                "'Affiliation Management' y 'Sales History'."
+            ),
+        }
 
 
 # ========== Matching Engine ==========

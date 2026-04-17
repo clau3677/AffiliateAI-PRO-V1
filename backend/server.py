@@ -546,6 +546,13 @@ async def hotmart_status():
     }
 
 
+@api_router.post("/hotmart/test-connection")
+async def hotmart_test_connection():
+    """Validate credentials + scopes against real Hotmart API."""
+    api = hm.HotmartAffiliateAPI()
+    return await api.test_connection()
+
+
 @api_router.post("/products/match")
 async def match_products(payload: MatchRequest, background_tasks: BackgroundTasks):
     if payload.country_code not in COUNTRIES:

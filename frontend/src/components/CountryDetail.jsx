@@ -16,6 +16,7 @@ import {
     startMatching,
     getMatchingExecution,
     fetchHotmartStatus,
+    testHotmartConnection,
 } from "../lib/api";
 import TrendsTable from "./TrendsTable";
 import PriorityBadge from "./PriorityBadge";
@@ -332,6 +333,70 @@ function Metric({ label, value }) {
     );
 }
 
+function HotmartDiagnostic() {
+    const [loading, setLoading] = React.useState(false);
+    const [result, setResult] = React.useState(null);
+
+    const run = async () => {
+        setLoading(true);
+        try {
+            const r = await testHotmartConnection();
+            setResult(r);
+            if (r.status === "ok") toast.success("Conexión Hotmart perfecta");
+            else if (r.status === "oauth_ok_scopes_missing")
+                toast.warning("OAuth OK — faltan scopes en tu app Hotmart");
+            else toast.error("Error de autenticación");
+        } catch (e) {
+            toast.error("No se pudo contactar Hotmart");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const bg =
+        result?.status === "ok"
+            ? { bg: "#DCFCE7", border: "#86EFAC", fg: "#166534" }
+            : result?.status === "oauth_ok_scopes_missing"
+              ? { bg: "#FEF3C7", border: "#FCD34D", fg: "#92400E" }
+              : { bg: "#F4F4F5", border: "#E4E4E7", fg: "#09090B" };
+
+    return (
+        <div
+            className="hard-border p-4 mb-6 flex items-start gap-4"
+            style={{ background: bg.bg, borderColor: bg.border }}
+            data-testid="hotmart-diagnostic"
+        >
+            <div className="flex-1">
+                <div
+                    className="font-semibold text-sm mb-1"
+                    style={{ color: bg.fg }}
+                >
+                    {result
+                        ? result.status === "ok"
+                            ? "Hotmart API conectado (todos los scopes OK)"
+                            : result.status === "oauth_ok_scopes_missing"
+                              ? "Hotmart OAuth conectado — faltan scopes"
+                              : "Error de conexión Hotmart"
+                        : "Hotmart credenciales configuradas"}
+                </div>
+                <p className="text-xs leading-relaxed text-[#52525B]">
+                    {result?.next_step ||
+                        result?.scope_detail ||
+                        "Prueba la conexión OAuth y los permisos de tu app Hotmart."}
+                </p>
+            </div>
+            <button
+                data-testid="test-hotmart-btn"
+                onClick={run}
+                disabled={loading}
+                className="px-3 py-2 hard-border bg-white surface-hover text-xs font-medium disabled:opacity-50"
+            >
+                {loading ? "Probando…" : "Probar conexión"}
+            </button>
+        </div>
+    );
+}
+
 function ProductsSection({
     countryCode,
     countryName,
@@ -405,6 +470,10 @@ function ProductsSection({
                         </p>
                     </div>
                 </div>
+            )}
+
+            {hotmartStatus && hotmartStatus.credentials_configured && (
+                <HotmartDiagnostic data-testid="hotmart-diagnostic" />
             )}
 
             {products.length === 0 && !matching ? (
