@@ -13,21 +13,21 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 class TestHotmartStatus:
     """GET /api/hotmart/status endpoint tests"""
     
-    def test_hotmart_status_returns_credentials_false(self):
-        """GET /api/hotmart/status → returns credentials_configured:false (no creds yet), scraper:enabled, llm_fallback:enabled"""
+    def test_hotmart_status_returns_credentials_configured(self):
+        """GET /api/hotmart/status → returns credentials_configured:true (creds loaded), scraper:enabled, llm_fallback:enabled"""
         response = requests.get(f"{BASE_URL}/api/hotmart/status")
         assert response.status_code == 200
-        
+
         data = response.json()
         assert "credentials_configured" in data
-        assert data["credentials_configured"] is False
+        assert data["credentials_configured"] is True
         assert "scraper" in data
         assert data["scraper"] == "enabled"
         assert "llm_fallback" in data
         assert data["llm_fallback"] == "enabled"
         assert "module" in data
         assert "affiliate_api" in data
-        assert data["affiliate_api"] == "credentials_missing"
+        assert data["affiliate_api"] == "ready"
 
 
 class TestProductsMatch:

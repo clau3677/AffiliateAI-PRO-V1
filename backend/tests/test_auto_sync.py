@@ -1,6 +1,6 @@
 """
 Test Module 2 Auto-Sync: Hotmart affiliations sync and auto-linking
-Tests the new endpoints: /hotmart/sync-affiliations, /hotmart/rematch-all
+Tests /hotmart/rematch-all (which performs sync + re-match internally)
 and verifies is_my_affiliation flag on products.
 """
 import pytest
@@ -10,33 +10,6 @@ import time
 from datetime import datetime, timezone
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
-
-
-class TestHotmartSyncAffiliations:
-    """Tests for POST /api/hotmart/sync-affiliations"""
-    
-    def test_sync_affiliations_returns_ok_status(self):
-        """Sync affiliations with valid creds returns status:ok"""
-        response = requests.post(f"{BASE_URL}/api/hotmart/sync-affiliations")
-        assert response.status_code == 200
-        data = response.json()
-        assert data.get("status") == "ok"
-        assert "synced" in data
-        assert isinstance(data["synced"], int)
-        assert "items" in data
-        assert isinstance(data["items"], list)
-    
-    def test_sync_affiliations_returns_zero_for_empty_account(self):
-        """Account with no affiliations returns synced:0"""
-        response = requests.post(f"{BASE_URL}/api/hotmart/sync-affiliations", timeout=60)
-        # Allow 502 as it may timeout on slow API calls
-        if response.status_code == 502:
-            pytest.skip("API timeout - Hotmart API may be slow")
-        assert response.status_code == 200
-        data = response.json()
-        # Test account has 0 real affiliations
-        assert data["synced"] == 0
-        assert data["items"] == []
 
 
 class TestHotmartRematchAll:
@@ -210,33 +183,6 @@ class TestExistingProductEndpoints:
         assert response.status_code == 200
         products = response.json()
         assert isinstance(products, list)
-    
-    def test_manual_link_save_endpoint(self):
-        """PATCH /api/products/{code}/{id}/manual-link saves link"""
-        # Get a product first
-        products_response = requests.get(f"{BASE_URL}/api/products/AR?limit=1")
-        products = products_response.json()
-        if products:
-            product_id = products[0]["hotmart_id"]
-            response = requests.patch(
-                f"{BASE_URL}/api/products/AR/{product_id}/manual-link",
-                json={"affiliate_link": "https://go.hotmart.com/TESTMANUAL123"}
-            )
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "saved"
-    
-    def test_manual_link_clear_endpoint(self):
-        """DELETE /api/products/{code}/{id}/manual-link clears link"""
-        # Get a product first
-        products_response = requests.get(f"{BASE_URL}/api/products/AR?limit=1")
-        products = products_response.json()
-        if products:
-            product_id = products[0]["hotmart_id"]
-            response = requests.delete(f"{BASE_URL}/api/products/AR/{product_id}/manual-link")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "cleared"
 
 
 class TestMatchAndScorePipeline:

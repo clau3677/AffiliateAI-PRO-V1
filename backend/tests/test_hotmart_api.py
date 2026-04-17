@@ -249,18 +249,6 @@ class TestDeleteTrends:
         assert response.status_code == 400
 
 
-class TestModule2Placeholder:
-    """Module 2 placeholder endpoint tests"""
-    
-    def test_products_match_returns_501(self):
-        """POST /api/products/match/AR returns 501 (Module 2 placeholder)"""
-        response = requests.post(f"{BASE_URL}/api/products/match/AR")
-        assert response.status_code == 501
-        
-        data = response.json()
-        assert "detail" in data
-
-
 class TestNoMongoIdInResponses:
     """Verify MongoDB _id is never exposed in API responses"""
     

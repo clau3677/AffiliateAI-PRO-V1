@@ -1,56 +1,76 @@
-# Hotmart Super Agent — Módulo 1 (Investigación de Mercado)
+# Hotmart Super Agent — PRD
 
 ## Original Problem Statement
-Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, PE, BR) usando Google Trends + LLM para identificar oportunidades de productos Hotmart. Módulo 1 = investigación de mercado. Módulo 2 (futuro) = selector de productos Hotmart.
+Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, PE, BR) usando Google Trends + LLM para identificar oportunidades, y empareja automáticamente con productos Hotmart afiliados por el usuario para generar hotlinks listos para promocionar. Toda la cadena debe ser automática: cero botones manuales, cero copy/paste de links.
 
 ## Architecture
-- **Backend**: FastAPI (Python), MongoDB (motor async), pytrends, emergentintegrations (Claude Sonnet 4.5)
-- **Frontend**: React 19 + Tailwind + Shadcn + Phosphor Icons + sonner (toasts)
-- **Data flow**: `/api/research/run` → background task → pytrends (Google Trends per country) → Claude Sonnet 4.5 enrichment (pain_point, commercial_intent, priority_score, suggested_product_type) → MongoDB `trends` collection.
+- **Backend**: FastAPI + MongoDB (motor) + pytrends + emergentintegrations (Claude Sonnet 4.5) + APScheduler + Hotmart OAuth API.
+- **Frontend**: React 19 + Tailwind + Shadcn + Phosphor Icons + sonner.
+- **Módulo 1**: `/api/research/run` → Google Trends por país → Claude enriquece (pain_point, commercial_intent, priority_score) → MongoDB `trends`.
+- **Módulo 2 (automático)**: `/api/hotmart/rematch-all` → sincroniza afiliaciones reales del usuario (`GET /affiliation/v2/affiliates/products`) → matchea contra pain points → upsert en `products` con `is_my_affiliation=true` + `affiliate_link` (hotlink real).
 
 ## User Personas
-- **Creadores / afiliados Hotmart** en Latam que necesitan saber qué demanda real existe por país.
-- **Marketers regionales** que quieren priorizar keywords por intención comercial y dolor.
+- Creadores / afiliados Hotmart en Latam que necesitan saber qué se demanda por país.
+- Marketers regionales priorizando keywords por intención comercial real.
 
-## Core Requirements (static)
-1. Investigar 5 países sudamericanos (AR, CL, CO, PE, BR) con keywords semilla por país.
-2. Combinar Google Trends real + análisis IA (Claude Sonnet 4.5).
-3. Clasificar por intención comercial (Alta/Media/Baja) y score de prioridad 0-100.
-4. Dashboard web en español para visualizar resultados.
-5. Estructura lista para el Módulo 2 (matching con productos Hotmart).
+## Core Requirements
+1. Investigar 5 países sudamericanos con Google Trends + Claude.
+2. Clasificar por intención comercial (Alta/Media/Baja) y priority_score 0-100.
+3. Dashboard en español con trends y productos matcheados.
+4. Pipeline Hotmart 100% automático (sin inputs manuales, sin copy/paste).
+5. Si el usuario no tiene afiliación para un trend, UI muestra CTA directo a Hotmart Affiliates Panel.
 
 ## Implemented (2026-04-17)
-- Backend endpoints: `/api/health`, `/api/countries`, `/api/research/run`, `/api/research/executions[/{id}]`, `/api/research/overview`, `/api/research/trends/{code}` (GET/DELETE, sort_by), `/api/research/summary/{code}`, `/api/products/match/{code}` (501 placeholder).
-- Orquestador background que procesa países en secuencia con delays éticos.
-- Fallback heurístico cuando LLM falla.
-- Upsert en MongoDB por (country_code, keyword) → sin duplicados.
-- Dashboard Swiss/high-contrast: stat strip, country cards, detalle modal con resumen ejecutivo + tabla sortable/filtrable de tendencias.
-- Execution tracker con progress bar y polling cada 2.5s.
-- Toasts (sonner) para feedback del usuario.
-- 100% test pass (19 backend + 8 frontend).
+### Módulo 1
+- Endpoints: `/api/health`, `/api/countries`, `/api/research/run`, `/api/research/executions[/{id}]`, `/api/research/overview`, `/api/research/trends/{code}` (GET/DELETE, sort_by), `/api/research/summary/{code}`.
+- Orquestador background con delays éticos; fallback heurístico si LLM falla.
+- Upsert `(country_code, keyword)` sin duplicados.
 
-## Express Affiliation Wizard (2026-04-17, iteration 5)
-- **Hallazgo crítico**: La API pública de Hotmart **no** expone endpoints de marketplace search ni auto-afiliación. Solo permite listar las afiliaciones existentes y generar hotlinks para productos ya afiliados.
-- **Solución pragmática**: `GET /api/hotmart/express-wizard?per_country=2&max_total=10` devuelve las TOP oportunidades cross-country (ordenadas por priority_score) con URLs de marketplace Hotmart pre-rellenadas por keyword (BR usa `pt-br`, resto `es`).
-- **Frontend `ExpressAffiliationWizard` modal**: stepper de 3 pasos (Selecciona → Afíliate → Sincroniza), checkboxes por oportunidad (TOP 5 preseleccionadas), botón "Abrir las N seleccionadas" que stagger-abre tabs, luego "Ya me afilié — Sincronizar" que dispara el rematch-all.
-- Flujo total usuario: seleccionar → 1 clic abre 5 tabs → "Afiliarme" en cada Hotmart (1 clic c/u) → volver → Sincronizar. **60 segundos para 5 productos reales con hotlinks**.
-- **29/29 backend tests + 15/15 frontend tests passing**. Total sistema: **144/144 tests**.
-- **Hotmart API credentials CON SCOPES DE PRODUCCIÓN** (`3eb648c5-...`): OAuth + scopes ok.
-- **Endpoints nuevos**: `POST /api/hotmart/sync-affiliations`, `POST /api/hotmart/rematch-all` (background), `GET /api/hotmart/my-affiliations`, `/sales-summary`, `/sales-history`, `/commissions`.
-- **Nueva colección MongoDB `hotmart_affiliations`**: espejo de las afiliaciones reales del usuario (upsert con `hotmart_id, title, category, commission_percent, rating, hotlink, product_url, ...`).
-- **`match_and_score` ahora ordena afiliaciones reales primero** (flag `is_my_affiliation`), luego productos de scraping/LLM. Dedupe por `hotmart_id`.
-- **Frontend `HotmartAccountPanel`**: botón "Sincronizar y enlazar" que sync + rematch en background para los 5 países.
-- **Frontend `ProductCard`**: badge verde "Mi afiliación" con icono Lightning + banner verde "Hotlink auto-generado" con botón Copiar directo (sin input manual) cuando `is_my_affiliation:true`.
-- **Flujo manual** (input + Guardar) se mantiene como fallback para productos de discovery.
-- **Total acumulado**: **100/100 tests passing** (70 previos + 30 iteration 4).
+### Módulo 2 — Hotmart automatizado (iteración actual)
+- Credenciales OAuth Hotmart configuradas con scopes productivos. `test-connection` devuelve `scopes_ok:true`.
+- **Pipeline automático único**: `POST /api/hotmart/rematch-all` sincroniza afiliaciones reales + reejecuta matching para los 5 países en background.
+- `match_and_score` (backend/hotmart.py) prioriza siempre `is_my_affiliation=true` con hotlink real; rellena con discovery (scraping + LLM) cuando hay menos afiliaciones que el limit.
+- `match_real_affiliations_to_trends`: fuzzy match título+categoría vs keywords del trend.
+- Endpoints data viva: `/api/hotmart/my-affiliations`, `/sales-summary`, `/sales-history`, `/commissions`, `/status`, `/test-connection`.
+
+### UI limpia (sin flujo manual)
+- `HotmartAccountPanel`: único botón **"Sincronizar y auto-enlazar"** (data-testid `sync-affiliations-btn`). Empty state explica al usuario: afíliate UNA VEZ en `app-vlc.hotmart.com/affiliates`, vuelve y sincroniza.
+- `ProductCard` reescrito:
+  - Si `is_my_affiliation && hasLink` → banner verde "Hotlink auto-generado" + botón Copiar.
+  - Si no → aviso amarillo "Aún no estás afiliado" + 2 botones: "Ver producto" (abre `product_url`) y "Afiliarme" (abre panel Hotmart).
+  - ❌ Eliminado: input manual de link, botones Guardar/Borrar, panel de ayuda amarillo.
+
+### Código eliminado en esta iteración
+- `ExpressAffiliationWizard.jsx` (componente completo).
+- `/api/hotmart/express-wizard` (endpoint).
+- `/api/hotmart/sync-affiliations` standalone (consolidado dentro de `/rematch-all`).
+- `PATCH /api/products/{code}/{id}/manual-link` y su `DELETE`.
+- `ManualLinkPayload` model.
+- Frontend: `fetchExpressWizard`, `saveManualAffiliateLink`, `clearManualAffiliateLink`, `syncAffiliations` en `lib/api.js`.
+- Tests obsoletos: `tests/test_express_wizard.py`, `tests/test_manual_link.py`, `TestHotmartSyncAffiliations`, `TestModule2Placeholder`, y tests de manual-link dentro de `test_auto_sync.py`.
+
+## Verified
+- `curl /api/health` → ok
+- `curl /api/hotmart/test-connection` → `scopes_ok:true`
+- `curl /api/hotmart/express-wizard` → 404 (correctamente eliminado)
+- `curl /api/products/AR/X/manual-link` (PATCH) → 404 (correctamente eliminado)
+- `curl /api/hotmart/rematch-all` → `status:started`, execution_id, 5 países
+- Testing agent (backend + code review): 5 endpoints eliminados confirman 404; UI confirmada sin referencias rotas.
+- Tests rápidos 20/20 passing.
+- Lint Python y JS limpios en archivos de producción.
 
 ## Backlog
-- **P0 — Módulo 2 (Hotmart Product Selector)**: integrar `hotmart-python` SDK oficial. Matching automático pain_point → producto. Ranking por comisión/rating/conversión.
-- **P1**: Programar ejecuciones automáticas (cron / scheduler) para refrescar tendencias semanalmente.
-- **P1**: Export CSV/JSON de tendencias y resúmenes ejecutivos.
-- **P2**: Expandir a los 10 países sudamericanos (BO, EC, PY, UY, VE).
-- **P2**: Integrar fuentes adicionales (MercadoLibre, foros locales) con LLM para extraer pain points no comerciales.
-- **P2**: Autenticación por usuario y separación de datos por workspace.
+### P1
+- Generar copy/anuncio automáticamente por producto+país (pedido del usuario para próxima iteración).
+- Export CSV/JSON de productos matcheados con hotlink.
+
+### P2
+- Ampliar a 10 países sudamericanos (BO, EC, PY, UY, VE).
+- Fuentes adicionales (MercadoLibre, foros locales) para pain points no comerciales.
+- Autenticación multi-usuario con workspaces aislados.
+- Cron diario de re-sync automático de afiliaciones (además del weekly existente).
 
 ## Credentials
-- `EMERGENT_LLM_KEY` ya configurado en `/app/backend/.env`. Da acceso a Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`).
+- `EMERGENT_LLM_KEY` configurado — da acceso a Claude Sonnet 4.5.
+- `HOTMART_CLIENT_ID`, `HOTMART_CLIENT_SECRET`, `HOTMART_BASIC_AUTH` configurados con scopes productivos.
+- Hotmart UI login (para afiliarse manualmente a productos): `Traficoclaudio@gmail.com` → panel `https://app-vlc.hotmart.com/affiliates`.
