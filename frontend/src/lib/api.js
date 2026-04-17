@@ -81,3 +81,9 @@ export const syncAffiliations = () =>
     api.post("/hotmart/sync-affiliations").then((r) => r.data);
 export const rematchAllCountries = () =>
     api.post("/hotmart/rematch-all").then((r) => r.data);
+export const fetchExpressWizard = (perCountry = 2, maxTotal = 10) =>
+    api
+        .get("/hotmart/express-wizard", {
+            params: { per_country: perCountry, max_total: maxTotal },
+        })
+        .then((r) => r.data);

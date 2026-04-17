@@ -6,6 +6,7 @@ import {
     ArrowClockwise,
     Receipt,
     Lightning,
+    Rocket,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import {
@@ -16,6 +17,7 @@ import {
     testHotmartConnection,
     rematchAllCountries,
 } from "../lib/api";
+import ExpressAffiliationWizard from "./ExpressAffiliationWizard";
 
 function fmtMoney(value, currency = "USD") {
     if (value === null || value === undefined) return "—";
@@ -38,6 +40,7 @@ export default function HotmartAccountPanel() {
     const [commissions, setCommissions] = useState([]);
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [wizardOpen, setWizardOpen] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -123,6 +126,16 @@ export default function HotmartAccountPanel() {
                                   : "Desconectado"}
                         </span>
                     </div>
+                    <button
+                        onClick={() => setWizardOpen(true)}
+                        disabled={connection?.status !== "ok"}
+                        data-testid="open-wizard-btn"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 hard-border surface-hover text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Asistente express: afíliate a 10 productos en 60 segundos"
+                    >
+                        <Rocket size={12} weight="bold" />
+                        Asistente Express
+                    </button>
                     <button
                         onClick={handleSync}
                         disabled={syncing || connection?.status !== "ok"}
@@ -261,6 +274,13 @@ export default function HotmartAccountPanel() {
                         ))}
                     </div>
                 </div>
+            )}
+
+            {wizardOpen && (
+                <ExpressAffiliationWizard
+                    onClose={() => setWizardOpen(false)}
+                    onDone={load}
+                />
             )}
         </section>
     );
