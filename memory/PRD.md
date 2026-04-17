@@ -29,7 +29,12 @@ Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, P
 - Toasts (sonner) para feedback del usuario.
 - 100% test pass (19 backend + 8 frontend).
 
-## Module 2 Auto-Sync (2026-04-17, iteration 4)
+## Express Affiliation Wizard (2026-04-17, iteration 5)
+- **Hallazgo crítico**: La API pública de Hotmart **no** expone endpoints de marketplace search ni auto-afiliación. Solo permite listar las afiliaciones existentes y generar hotlinks para productos ya afiliados.
+- **Solución pragmática**: `GET /api/hotmart/express-wizard?per_country=2&max_total=10` devuelve las TOP oportunidades cross-country (ordenadas por priority_score) con URLs de marketplace Hotmart pre-rellenadas por keyword (BR usa `pt-br`, resto `es`).
+- **Frontend `ExpressAffiliationWizard` modal**: stepper de 3 pasos (Selecciona → Afíliate → Sincroniza), checkboxes por oportunidad (TOP 5 preseleccionadas), botón "Abrir las N seleccionadas" que stagger-abre tabs, luego "Ya me afilié — Sincronizar" que dispara el rematch-all.
+- Flujo total usuario: seleccionar → 1 clic abre 5 tabs → "Afiliarme" en cada Hotmart (1 clic c/u) → volver → Sincronizar. **60 segundos para 5 productos reales con hotlinks**.
+- **29/29 backend tests + 15/15 frontend tests passing**. Total sistema: **144/144 tests**.
 - **Hotmart API credentials CON SCOPES DE PRODUCCIÓN** (`3eb648c5-...`): OAuth + scopes ok.
 - **Endpoints nuevos**: `POST /api/hotmart/sync-affiliations`, `POST /api/hotmart/rematch-all` (background), `GET /api/hotmart/my-affiliations`, `/sales-summary`, `/sales-history`, `/commissions`.
 - **Nueva colección MongoDB `hotmart_affiliations`**: espejo de las afiliaciones reales del usuario (upsert con `hotmart_id, title, category, commission_percent, rating, hotlink, product_url, ...`).
