@@ -30,7 +30,7 @@ export const clearCountry = (code) =>
 export const fetchHotmartStatus = () =>
     api.get("/hotmart/status").then((r) => r.data);
 export const testHotmartConnection = () =>
-    api.post("/hotmart/test-connection").then((r) => r.data);
+    api.get("/hotmart/test-connection").then((r) => r.data);
 export const fetchProducts = (code, limit = 30) =>
     api
         .get(`/products/${code}`, { params: { limit } })

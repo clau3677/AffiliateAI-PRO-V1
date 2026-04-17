@@ -547,6 +547,7 @@ async def hotmart_status():
 
 
 @api_router.post("/hotmart/test-connection")
+@api_router.get("/hotmart/test-connection")
 async def hotmart_test_connection():
     """Validate credentials + scopes against real Hotmart API."""
     api = hm.HotmartAffiliateAPI()
