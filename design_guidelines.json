@@ -1,0 +1,95 @@
+{
+  "theme": "Light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "design_philosophy": "Authoritative, clear, and function-first. The design leverages tight grids, stark contrasts, and absolute minimalism to let the data shine. Minimal use of color; color is strictly functional, used for signaling priority and data hierarchy. It feels professional and data-dense for marketers targeting South America.",
+  "colors": {
+    "background": "#FAFAFA",
+    "surface": "#FFFFFF",
+    "surface_hover": "#F4F4F5",
+    "border": "#E4E4E7",
+    "text_primary": "#09090B",
+    "text_secondary": "#52525B",
+    "text_tertiary": "#A1A1AA",
+    "primary": "#09090B",
+    "primary_foreground": "#FFFFFF",
+    "signals": {
+      "high_priority": "#DC2626", 
+      "medium_priority": "#D97706",
+      "low_priority": "#2563EB",
+      "success": "#16A34A"
+    }
+  },
+  "typography": {
+    "heading_font": "Cabinet Grotesk",
+    "body_font": "IBM Plex Sans",
+    "mono_font": "JetBrains Mono",
+    "scales": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-bold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "h4": "text-lg sm:text-xl tracking-tight font-medium",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "overline": "text-xs font-mono uppercase tracking-[0.2em] text-[#52525B]"
+    }
+  },
+  "layout_and_spacing": {
+    "grid_system": "The 'Control Room' Grid - grid-cols-1 md:grid-cols-3 lg:grid-cols-4 with tight gaps (gap-4 or gap-6).",
+    "container_padding": "p-6 sm:p-8 md:p-12",
+    "card_padding": "p-6",
+    "border_radius": "rounded-none",
+    "borders": "1px solid border-[#E4E4E7]",
+    "shadows": "None. Use sharp borders for definition instead of soft shadows (Swiss Brutalism)."
+  },
+  "components": {
+    "cards": {
+      "style": "Grid Borders (The 'Technical' Look). Flat white background, 1px subtle border, no shadow. Content aligned left.",
+      "hover_state": "Slight background tint shift to #F4F4F5. No translation or lifting."
+    },
+    "buttons": {
+      "primary": "Solid dark background (primary), white text, rounded-none, uppercase tracking-wide font-medium. Hover: slightly lighter dark grey.",
+      "secondary": "Outline button with 1px border. Background transparent, text primary color. Hover: background #F4F4F5."
+    },
+    "tables": {
+      "style": "Dense, full-width. Sticky headers with a hard bottom border. Minimal padding inside cells (px-4 py-3). Hover effects on rows. Use monospace font for numeric columns (Priority Score)."
+    },
+    "tags_chips": {
+      "style": "Used for 'Puntos de Dolor' (Pain Points) and 'Intención Comercial'. Solid muted background with dark text, or thin outline. Border radius rounded-full for visual contrast against the sharp cards."
+    },
+    "navigation": {
+      "style": "Solid background, sticky top, with a hard bottom border. Logo/App Title on left, actions ('Ejecutar Investigación') on right."
+    }
+  },
+  "motion": {
+    "transitions": "Fast and purposeful. 150ms ease-in-out for hover states.",
+    "page_load": "Staggered fade-in and slight slide-up (translate-y-2 to 0) for dashboard widgets."
+  },
+  "icons": {
+    "library": "Phosphor Icons",
+    "installation": "yarn add @phosphor-icons/react",
+    "style": "Regular or Bold weight, monolinear, clean to match the functional Swiss style."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "category": "dashboard_header_bg",
+        "url": "https://static.prod-images.emergentagent.com/jobs/dbfb609a-94bf-468c-9d8b-30f6d725b119/images/8057ca9d0e3bf23e63e14b3fb45c33603e8a7fd373158b164a00722accfcc437.png",
+        "description": "Abstract geometric Swiss design background for the top header section. Very light opacity, used to give texture to the main dashboard container."
+      },
+      {
+        "category": "south_america_data_map",
+        "url": "https://static.prod-images.emergentagent.com/jobs/dbfb609a-94bf-468c-9d8b-30f6d725b119/images/70e64eb2eb82828f5d312d15917d26011fdd761ceddeb6c1dddfe417a33b2f3a.png",
+        "description": "Abstract South America map background for the regional overview widget. Gives a data-driven enterprise look to the country selection panel."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "MUST USE LATIN AMERICAN SPANISH for all UI text (e.g., 'Resumen Ejecutivo', 'Ejecutar Investigación', 'Puntos de Dolor', 'Intención Comercial').",
+    "Structure the dashboard using the 'Control Room' grid pattern. Every pixel must be utilized with tight gaps.",
+    "Ensure 'Nivel de Prioridad' in the tables uses signal colors for High/Medium/Low. E.g., High (Alto) -> #DC2626.",
+    "Use pure HTML + Tailwind for macro layouts if Shadcn wrappers restrict strict grid structures.",
+    "Apply `data-testid` attributes (kebab-case, role-based) to all interactive elements (buttons, table headers, tabs, list items).",
+    "Use JetBrains Mono or a system monospaced font for all numeric data, metric counters, and priority scores.",
+    "Do not center-align tables or lists. Maintain left-alignment for scannability.",
+    "Implement real-time research progress indicators with a clean, linear progress bar or minimal spinner without overwhelming the UI."
+  ]
+}
