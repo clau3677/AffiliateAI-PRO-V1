@@ -22,6 +22,9 @@ from pytrends.request import TrendReq
 from tenacity import retry, stop_after_attempt, wait_exponential  # noqa: F401
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+import hotmart as hm
 
 
 # ---------- Bootstrap ----------
@@ -492,13 +495,154 @@ async def clear_trends(country_code: str):
     return {"deleted": result.deleted_count, "country_code": country_code}
 
 
-# ---------- Module 2 placeholder ----------
-@api_router.post("/products/match/{country_code}")
-async def match_products(country_code: str):
-    raise HTTPException(
-        status_code=501,
-        detail="Módulo 2 (Hotmart Product Selector): pendiente de implementación.",
+# ---------- Module 2: Hotmart Product Matching ----------
+class MatchRequest(BaseModel):
+    country_code: str
+    limit: int = Field(default=10, ge=1, le=30)
+    auto_links: bool = True
+
+
+async def _run_matching_task(execution_id: str, country_code: str, limit: int, auto_links: bool):
+    """Background matching task — mirrors research executions for unified UX."""
+    try:
+        await db.product_executions.update_one(
+            {"id": execution_id}, {"$set": {"status": "running"}}
+        )
+        products = await hm.match_and_score(
+            db=db,
+            country_code=country_code,
+            country_name=COUNTRIES[country_code]["name"],
+            limit=limit,
+            auto_links=auto_links,
+        )
+        await db.product_executions.update_one(
+            {"id": execution_id},
+            {"$set": {
+                "status": "completed",
+                "products_found": len(products),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+    except Exception as e:
+        logger.exception(f"Matching execution {execution_id} failed: {e}")
+        await db.product_executions.update_one(
+            {"id": execution_id},
+            {"$set": {
+                "status": "failed",
+                "error": str(e)[:500],
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
+
+@api_router.get("/hotmart/status")
+async def hotmart_status():
+    return {
+        "credentials_configured": hm.hotmart_credentials_configured(),
+        "module": "2 - Hotmart Product Matching",
+        "affiliate_api": "ready" if hm.hotmart_credentials_configured() else "credentials_missing",
+        "scraper": "enabled",
+        "llm_fallback": "enabled" if EMERGENT_LLM_KEY else "disabled",
+    }
+
+
+@api_router.post("/products/match")
+async def match_products(payload: MatchRequest, background_tasks: BackgroundTasks):
+    if payload.country_code not in COUNTRIES:
+        raise HTTPException(status_code=400, detail=f"País no soportado. Usa: {TARGET_COUNTRIES}")
+
+    # Ensure trends exist for that country
+    trend_count = await db.trends.count_documents({"country_code": payload.country_code})
+    if trend_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Sin tendencias para {payload.country_code}. Ejecuta primero /api/research/run para ese país.",
+        )
+
+    execution_id = str(uuid.uuid4())
+    await db.product_executions.insert_one({
+        "id": execution_id,
+        "country_code": payload.country_code,
+        "limit": payload.limit,
+        "auto_links": payload.auto_links,
+        "status": "pending",
+        "products_found": 0,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "error": None,
+    })
+    background_tasks.add_task(_run_matching_task, execution_id, payload.country_code, payload.limit, payload.auto_links)
+    return {
+        "execution_id": execution_id,
+        "status": "started",
+        "country_code": payload.country_code,
+        "message": f"Matching iniciado para {payload.country_code}. Resultados en ~30-60s.",
+    }
+
+
+@api_router.get("/products/executions/{execution_id}")
+async def get_product_execution(execution_id: str):
+    doc = await db.product_executions.find_one({"id": execution_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Execution no encontrada")
+    return doc
+
+
+@api_router.get("/products/{country_code}")
+async def get_products(country_code: str, limit: int = 30):
+    if country_code not in COUNTRIES:
+        raise HTTPException(status_code=400, detail=f"País no soportado. Usa: {TARGET_COUNTRIES}")
+    cursor = db.products.find({"country_code": country_code}, {"_id": 0}).sort("relevance_score", -1).limit(limit)
+    items = await cursor.to_list(length=limit)
+    return items
+
+
+@api_router.get("/products/{country_code}/{hotmart_id}/affiliate-link")
+async def get_or_generate_affiliate_link(country_code: str, hotmart_id: str, force: bool = False):
+    product = await db.products.find_one(
+        {"country_code": country_code, "hotmart_id": hotmart_id}, {"_id": 0}
     )
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    # If already generated and not forced, return cached
+    if not force and product.get("affiliate_status") == "generated" and product.get("affiliate_link"):
+        return {
+            "hotmart_id": hotmart_id,
+            "affiliate_link": product["affiliate_link"],
+            "status": "cached",
+            "tracking_id": product.get("tracking_id"),
+        }
+
+    # Synthetic products can't use real API
+    if product.get("is_fallback") or str(hotmart_id).startswith(("ai_", "det_", "hm_")):
+        return {
+            "hotmart_id": hotmart_id,
+            "status": "synthetic_product",
+            "error": "Este es un producto sugerido por IA. Busca el producto real en Hotmart marketplace.",
+        }
+
+    api_client = hm.HotmartAffiliateAPI()
+    result = await api_client.generate_hotlink(hotmart_id)
+    if result.get("status") == "generated":
+        await db.products.update_one(
+            {"country_code": country_code, "hotmart_id": hotmart_id},
+            {"$set": {
+                "affiliate_link": result["hotlink"],
+                "affiliate_status": "generated",
+                "tracking_id": result.get("tracking_id"),
+                "affiliate_link_generated_at": result["generated_at"],
+            }},
+        )
+    return {"hotmart_id": hotmart_id, **result}
+
+
+@api_router.delete("/products/{country_code}")
+async def clear_products(country_code: str):
+    if country_code not in COUNTRIES:
+        raise HTTPException(status_code=400, detail=f"País no soportado. Usa: {TARGET_COUNTRIES}")
+    result = await db.products.delete_many({"country_code": country_code})
+    return {"deleted": result.deleted_count, "country_code": country_code}
 
 
 app.include_router(api_router)
@@ -512,17 +656,59 @@ app.add_middleware(
 )
 
 
+# ---------- Scheduler (weekly refresh) ----------
+scheduler = AsyncIOScheduler()
+
+
+async def weekly_refresh_job():
+    """Every Sunday 03:00 UTC: re-run research + product matching for all countries."""
+    logger.info("⏱️  Weekly refresh job starting")
+    has_creds = hm.hotmart_credentials_configured()
+    for country_code in TARGET_COUNTRIES:
+        try:
+            # Re-run matching (uses cached trends from last research run)
+            products = await hm.match_and_score(
+                db=db,
+                country_code=country_code,
+                country_name=COUNTRIES[country_code]["name"],
+                limit=10,
+                auto_links=has_creds,
+            )
+            if has_creds:
+                generated = sum(1 for p in products if p.get("affiliate_status") == "generated")
+                logger.info(f"✅ {country_code}: {len(products)} products, {generated} hotlinks")
+            else:
+                logger.info(f"✅ {country_code}: {len(products)} products (hotlinks pendientes: credenciales faltantes)")
+            await asyncio.sleep(3)
+        except Exception as e:
+            logger.warning(f"Weekly job {country_code}: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     try:
         await db.trends.create_index([("country_code", 1), ("keyword", 1)], unique=True)
         await db.trends.create_index([("priority_score", -1)])
         await db.research_executions.create_index([("started_at", -1)])
+        await db.products.create_index([("country_code", 1), ("hotmart_id", 1)], unique=True)
+        await db.products.create_index([("relevance_score", -1)])
+        await db.product_executions.create_index([("started_at", -1)])
         logger.info("✅ Indexes ensured")
     except Exception as e:
         logger.warning(f"Index creation warning: {e}")
 
+    try:
+        scheduler.add_job(weekly_refresh_job, "cron", day_of_week="sun", hour=3, minute=0, id="weekly_refresh")
+        scheduler.start()
+        logger.info("⏱️  Scheduler activated (Sundays 03:00 UTC)")
+    except Exception as e:
+        logger.warning(f"Scheduler warning: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:
+        pass
     client.close()

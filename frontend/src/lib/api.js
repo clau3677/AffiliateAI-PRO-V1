@@ -25,3 +25,29 @@ export const listExecutions = () =>
     api.get("/research/executions").then((r) => r.data);
 export const clearCountry = (code) =>
     api.delete(`/research/trends/${code}`).then((r) => r.data);
+
+// ---- Module 2: Hotmart products ----
+export const fetchHotmartStatus = () =>
+    api.get("/hotmart/status").then((r) => r.data);
+export const fetchProducts = (code, limit = 30) =>
+    api
+        .get(`/products/${code}`, { params: { limit } })
+        .then((r) => r.data);
+export const startMatching = (code, limit = 10, autoLinks = true) =>
+    api
+        .post("/products/match", {
+            country_code: code,
+            limit,
+            auto_links: autoLinks,
+        })
+        .then((r) => r.data);
+export const getMatchingExecution = (id) =>
+    api.get(`/products/executions/${id}`).then((r) => r.data);
+export const generateAffiliateLink = (code, hotmartId, force = false) =>
+    api
+        .get(`/products/${code}/${hotmartId}/affiliate-link`, {
+            params: { force },
+        })
+        .then((r) => r.data);
+export const clearProducts = (code) =>
+    api.delete(`/products/${code}`).then((r) => r.data);
