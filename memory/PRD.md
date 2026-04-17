@@ -29,15 +29,15 @@ Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, P
 - Toasts (sonner) para feedback del usuario.
 - 100% test pass (19 backend + 8 frontend).
 
-## Module 2 Implemented (2026-04-17)
-- **Hotmart Marketplace Scraper** (`hotmart.py`): BeautifulSoup + httpx con detección anti-bot (Cloudflare). Best-effort; devuelve [] si bloqueado.
-- **LLM Fallback** (Claude Sonnet 4.5): genera productos Hotmart-style plausibles (`ai_*` IDs) cuando el scraping falla. Producción de alta calidad con contexto cultural (ej: "Dólar Refugio", "Emprendedor Anticrisis", "Mente en Calma").
-- **Affiliate API Client** (OAuth2 client_credentials): handling graceful cuando faltan credenciales → devuelve `credentials_missing` status. Productos sintéticos devuelven `synthetic_product`.
-- **Matching Engine**: scoring combinado (relevance 60% + profitability 40%). Profitability = `commission × rating × volume_factor`. Relevance = match de keywords en título/categoría.
-- **Endpoints**: `/api/hotmart/status`, `/api/products/match` (POST), `/api/products/executions/{id}`, `/api/products/{code}` (GET/DELETE), `/api/products/{code}/{hotmart_id}/affiliate-link`.
-- **Scheduler APScheduler**: refresco semanal domingos 03:00 UTC (scraping + matching + hotlinks condicionales).
-- **Frontend**: tabs dentro del detalle de país (Tendencias / Productos Hotmart), `ProductCard` con comisión/rating/score/pain chips, banner de credenciales pendientes, botones "Generar link" → "Copiar mi link" según status.
-- 100% test pass adicional (15 backend + 8 frontend = **42 tests totales**).
+## Module 2 Auto-Sync (2026-04-17, iteration 4)
+- **Hotmart API credentials CON SCOPES DE PRODUCCIÓN** (`3eb648c5-...`): OAuth + scopes ok.
+- **Endpoints nuevos**: `POST /api/hotmart/sync-affiliations`, `POST /api/hotmart/rematch-all` (background), `GET /api/hotmart/my-affiliations`, `/sales-summary`, `/sales-history`, `/commissions`.
+- **Nueva colección MongoDB `hotmart_affiliations`**: espejo de las afiliaciones reales del usuario (upsert con `hotmart_id, title, category, commission_percent, rating, hotlink, product_url, ...`).
+- **`match_and_score` ahora ordena afiliaciones reales primero** (flag `is_my_affiliation`), luego productos de scraping/LLM. Dedupe por `hotmart_id`.
+- **Frontend `HotmartAccountPanel`**: botón "Sincronizar y enlazar" que sync + rematch en background para los 5 países.
+- **Frontend `ProductCard`**: badge verde "Mi afiliación" con icono Lightning + banner verde "Hotlink auto-generado" con botón Copiar directo (sin input manual) cuando `is_my_affiliation:true`.
+- **Flujo manual** (input + Guardar) se mantiene como fallback para productos de discovery.
+- **Total acumulado**: **100/100 tests passing** (70 previos + 30 iteration 4).
 
 ## Backlog
 - **P0 — Módulo 2 (Hotmart Product Selector)**: integrar `hotmart-python` SDK oficial. Matching automático pain_point → producto. Ranking por comisión/rating/conversión.
