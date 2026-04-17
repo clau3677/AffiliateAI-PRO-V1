@@ -53,3 +53,13 @@ export const generateAffiliateLink = (code, hotmartId, force = false) =>
         .then((r) => r.data);
 export const clearProducts = (code) =>
     api.delete(`/products/${code}`).then((r) => r.data);
+export const saveManualAffiliateLink = (code, hotmartId, link) =>
+    api
+        .patch(`/products/${code}/${hotmartId}/manual-link`, {
+            affiliate_link: link,
+        })
+        .then((r) => r.data);
+export const clearManualAffiliateLink = (code, hotmartId) =>
+    api
+        .delete(`/products/${code}/${hotmartId}/manual-link`)
+        .then((r) => r.data);

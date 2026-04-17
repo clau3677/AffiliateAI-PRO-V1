@@ -644,6 +644,49 @@ async def get_or_generate_affiliate_link(country_code: str, hotmart_id: str, for
     return {"hotmart_id": hotmart_id, **result}
 
 
+class ManualLinkPayload(BaseModel):
+    affiliate_link: str
+
+
+@api_router.patch("/products/{country_code}/{hotmart_id}/manual-link")
+async def save_manual_affiliate_link(country_code: str, hotmart_id: str, payload: ManualLinkPayload):
+    """User pastes their own hotlink after self-affiliating on Hotmart."""
+    link = payload.affiliate_link.strip()
+    if not link:
+        raise HTTPException(status_code=400, detail="Link vacío")
+    if "hotmart.com" not in link.lower():
+        raise HTTPException(status_code=400, detail="El link debe contener 'hotmart.com' (ej: go.hotmart.com/...)")
+
+    result = await db.products.update_one(
+        {"country_code": country_code, "hotmart_id": hotmart_id},
+        {"$set": {
+            "affiliate_link": link,
+            "affiliate_status": "manual",
+            "affiliate_link_generated_at": datetime.now(timezone.utc).isoformat(),
+            "tracking_id": "manual",
+        }},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return {"status": "saved", "affiliate_link": link}
+
+
+@api_router.delete("/products/{country_code}/{hotmart_id}/manual-link")
+async def clear_manual_affiliate_link(country_code: str, hotmart_id: str):
+    result = await db.products.update_one(
+        {"country_code": country_code, "hotmart_id": hotmart_id},
+        {"$set": {
+            "affiliate_link": None,
+            "affiliate_status": "pending",
+            "tracking_id": None,
+            "affiliate_link_generated_at": None,
+        }},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return {"status": "cleared"}
+
+
 @api_router.delete("/products/{country_code}")
 async def clear_products(country_code: str):
     if country_code not in COUNTRIES:
