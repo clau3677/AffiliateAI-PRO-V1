@@ -491,9 +491,150 @@ class HotmartAffiliateAPI:
         )
 
 
+async def sync_my_affiliations(db) -> Dict[str, Any]:
+    """Fetch user's real Hotmart affiliations and upsert into MongoDB.
+
+    Returns: {synced: int, items: List[normalized affiliations]}.
+    Each affiliation contains {hotmart_id, title, category, hotlink, commission_percent, ...}.
+    """
+    api = HotmartAffiliateAPI()
+    result = await api.list_my_affiliations(max_results=200)
+    if result.get("status") != "ok":
+        return {"status": result.get("status", "error"), "synced": 0, "error": result.get("error")}
+
+    raw_items = result.get("items", []) or []
+    normalized: List[Dict[str, Any]] = []
+
+    for item in raw_items:
+        product = item.get("product") or {}
+        hotmart_id = str(
+            item.get("product_id")
+            or product.get("id")
+            or item.get("id")
+            or ""
+        ).strip()
+        if not hotmart_id:
+            continue
+
+        hotlink = (
+            item.get("hotlink")
+            or item.get("link")
+            or product.get("hotlink")
+            or item.get("affiliate_url")
+        )
+        title = (
+            product.get("name")
+            or item.get("name")
+            or item.get("product_name")
+            or f"Producto Hotmart {hotmart_id}"
+        )
+        category = product.get("category") or item.get("category") or "General"
+        commission = (
+            item.get("commission_percent")
+            or item.get("commission")
+            or product.get("commission_percent")
+            or 0.0
+        )
+        try:
+            commission = float(commission)
+        except Exception:
+            commission = 0.0
+        rating = float(product.get("rating") or item.get("rating") or 4.0)
+        product_url = product.get("product_url") or item.get("product_url") or hotlink or ""
+        creator = product.get("producer", {}).get("name") if isinstance(product.get("producer"), dict) else None
+        creator = creator or item.get("producer") or product.get("creator") or "Creador Hotmart"
+
+        doc = {
+            "hotmart_id": hotmart_id,
+            "title": str(title)[:220],
+            "category": str(category)[:80],
+            "commission_percent": commission,
+            "rating": rating,
+            "hotlink": hotlink,
+            "product_url": str(product_url)[:500],
+            "creator_name": str(creator)[:120],
+            "raw": item,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.hotmart_affiliations.update_one(
+            {"hotmart_id": hotmart_id},
+            {"$set": doc},
+            upsert=True,
+        )
+        normalized.append(doc)
+
+    return {"status": "ok", "synced": len(normalized), "items": normalized}
+
+
+def _text_match_score(title: str, category: str, keyword: str) -> float:
+    """Fuzzy overlap between product text and a keyword."""
+    text = f"{title} {category}".lower()
+    kw = keyword.lower()
+    if kw in text:
+        return 1.0
+    # Word overlap
+    kw_words = [w for w in kw.split() if len(w) > 3]
+    if not kw_words:
+        return 0.0
+    hits = sum(1 for w in kw_words if w in text)
+    return hits / len(kw_words)
+
+
+async def match_real_affiliations_to_trends(db, country_code: str, pain_keywords: List[str]) -> List[Dict]:
+    """Return user's real affiliated products that match pain points from Module 1."""
+    cursor = db.hotmart_affiliations.find({}, {"_id": 0})
+    affiliations = await cursor.to_list(length=500)
+    if not affiliations:
+        return []
+
+    matched: List[Dict] = []
+    for aff in affiliations:
+        best_score = 0.0
+        matched_kws: List[str] = []
+        for kw in pain_keywords:
+            s = _text_match_score(aff.get("title", ""), aff.get("category", ""), kw)
+            if s > 0.0:
+                matched_kws.append(kw)
+                best_score = max(best_score, s)
+        if not matched_kws:
+            continue
+
+        commission = float(aff.get("commission_percent") or 0.0)
+        rating = float(aff.get("rating") or 4.0)
+        profitability = round(min(100.0, (commission * rating) / 5.0), 2)
+        relevance = round(min(100.0, best_score * 100 + profitability * 0.3), 2)
+
+        matched.append({
+            "hotmart_id": aff["hotmart_id"],
+            "title": aff["title"],
+            "category": aff["category"],
+            "commission_percent": commission,
+            "rating": rating,
+            "sales_count_30d": 200,
+            "product_url": aff.get("product_url") or aff.get("hotlink") or "",
+            "creator_name": aff.get("creator_name", "Creador Hotmart"),
+            "language": "es",
+            "available_countries": [country_code],
+            "is_fallback": False,
+            "is_my_affiliation": True,
+            "country_code": country_code,
+            "matched_pain_points": matched_kws,
+            "relevance_score": relevance,
+            "profitability_score": profitability,
+            "affiliate_status": "generated" if aff.get("hotlink") else "pending",
+            "affiliate_link": aff.get("hotlink"),
+            "tracking_id": "hotmart_api",
+            "clicks_count": 0,
+            "conversions_count": 0,
+            "estimated_revenue": 0.0,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+        })
+    return matched
+
+
 # ========== Matching Engine ==========
 async def match_and_score(db, country_code: str, country_name: str, limit: int = 10, auto_links: bool = True) -> List[Dict]:
-    """Pipeline completo: pain_points → scraping/LLM → scoring → (opcional) hotlinks → upsert MongoDB."""
+    """Pipeline completo: pain_points → real affiliations + scraping/LLM → scoring → upsert MongoDB."""
     # 1. Pull trends from module 1
     cursor = db.trends.find(
         {"country_code": country_code, "commercial_intent": {"$in": ["Alta", "Media"]}},
@@ -505,20 +646,28 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
 
     pain_keywords = [t["keyword"] for t in trends]
 
-    # 2. Scraping (best effort)
-    scraper = HotmartMarketplaceScraper()
-    raw_products = await scraper.search(pain_keywords, country_code, min_commission=40.0)
+    # 2. Auto-sync user's real Hotmart affiliations (if creds available)
+    real_products: List[Dict] = []
+    if hotmart_credentials_configured():
+        try:
+            await sync_my_affiliations(db)
+            real_products = await match_real_affiliations_to_trends(db, country_code, pain_keywords)
+            if real_products:
+                logger.info(f"🔗 {len(real_products)} real affiliations matched for {country_code}")
+        except Exception as e:
+            logger.warning(f"Affiliation sync failed: {e}")
 
-    # 3. LLM fallback if scraping empty
-    if not raw_products:
-        logger.info(f"⚠️ Scraping vacío para {country_code}. Activando fallback LLM.")
-        raw_products = await llm_generate_products(trends, country_code, country_name, limit=limit)
+    # 3. Discovery: scraping + LLM fallback for products to suggest
+    raw_products: List[Dict] = []
+    if len(real_products) < limit:
+        scraper = HotmartMarketplaceScraper()
+        raw_products = await scraper.search(pain_keywords, country_code, min_commission=40.0)
+        if not raw_products:
+            logger.info(f"⚠️ Scraping vacío para {country_code}. Fallback LLM.")
+            raw_products = await llm_generate_products(trends, country_code, country_name, limit=limit)
 
-    if not raw_products:
-        return []
-
-    # 4. Scoring
-    scored: List[Dict] = []
+    # 4. Score discovery products
+    scored_discovery: List[Dict] = []
     for p in raw_products:
         vol = p.get("sales_count_30d", 50)
         profitability = (p["commission_percent"] * p["rating"] * (1 + vol / 500)) / 100
@@ -526,7 +675,6 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
 
         text = f"{p['title']} {p.get('category', '')}".lower()
         matches = [kw for kw in pain_keywords if kw.lower() in text]
-        # If scraping-based product has no match, check partial word overlap
         if not matches:
             words = set(text.split())
             for kw in pain_keywords:
@@ -536,9 +684,10 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
         relevance = min(100.0, (len(matches) / max(1, len(pain_keywords))) * 100 + (profitability * 0.3))
         relevance = round(relevance, 2)
 
-        scored.append({
+        scored_discovery.append({
             **p,
             "country_code": country_code,
+            "is_my_affiliation": False,
             "matched_pain_points": matches,
             "relevance_score": relevance,
             "profitability_score": profitability,
@@ -551,35 +700,35 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    scored.sort(key=lambda x: x["relevance_score"] * 0.6 + x["profitability_score"] * 0.4, reverse=True)
-    top = scored[:limit]
+    # 5. Merge: real affiliations ALWAYS first, then discovery. Dedupe by hotmart_id.
+    seen = {p["hotmart_id"] for p in real_products}
+    merged = list(real_products)
+    for p in scored_discovery:
+        if p["hotmart_id"] not in seen:
+            merged.append(p)
+            seen.add(p["hotmart_id"])
 
-    # 5. Hotlinks (only if credentials present)
-    affiliate_api = HotmartAffiliateAPI()
+    merged.sort(
+        key=lambda x: (
+            1 if x.get("is_my_affiliation") else 0,  # real affiliations first
+            x["relevance_score"] * 0.6 + x["profitability_score"] * 0.4,
+        ),
+        reverse=True,
+    )
+    top = merged[:limit]
+
+    # 6. For discovery products (not user affiliations), set credentials_missing status if applicable
     has_creds = hotmart_credentials_configured()
-    if auto_links and has_creds:
-        for p in top[:5]:
-            if str(p["hotmart_id"]).startswith(("ai_", "det_", "hm_")):
-                # Synthetic products can't get real hotlinks
-                p["affiliate_status"] = "synthetic_product"
-                continue
-            try:
-                result = await affiliate_api.generate_hotlink(p["hotmart_id"])
-                if result.get("status") == "generated":
-                    p["affiliate_link"] = result["hotlink"]
-                    p["affiliate_status"] = "generated"
-                    p["tracking_id"] = result.get("tracking_id")
-                    p["affiliate_link_generated_at"] = result["generated_at"]
-                else:
-                    p["affiliate_status"] = result.get("status", "error")
-            except Exception as e:
-                p["affiliate_status"] = f"failed:{str(e)[:80]}"
-            await asyncio.sleep(AFFILIATE_API_DELAY)
-    elif auto_links and not has_creds:
-        for p in top[:5]:
+    for p in top:
+        if p.get("is_my_affiliation"):
+            # Already has real hotlink, skip
+            continue
+        if auto_links and not has_creds:
             p["affiliate_status"] = "credentials_missing"
+        elif str(p["hotmart_id"]).startswith(("ai_", "det_", "hm_")):
+            p["affiliate_status"] = "synthetic_product"
 
-    # 6. Upsert
+    # 7. Upsert
     for p in top:
         await db.products.update_one(
             {"hotmart_id": p["hotmart_id"], "country_code": country_code},

@@ -581,6 +581,92 @@ async def hotmart_commissions(max_results: int = 20):
     return await api.sales_commissions(max_results=max_results)
 
 
+@api_router.post("/hotmart/sync-affiliations")
+async def hotmart_sync_affiliations():
+    """Pulls user's real Hotmart affiliations into MongoDB for auto-linking."""
+    if not hm.hotmart_credentials_configured():
+        raise HTTPException(status_code=400, detail="Credenciales Hotmart no configuradas")
+    result = await hm.sync_my_affiliations(db)
+    return result
+
+
+@api_router.post("/hotmart/rematch-all")
+async def hotmart_rematch_all(background_tasks: BackgroundTasks):
+    """After syncing affiliations, re-run matching for every country so real hotlinks are attached."""
+    if not hm.hotmart_credentials_configured():
+        raise HTTPException(status_code=400, detail="Credenciales Hotmart no configuradas")
+
+    # Sync first (fast — just one API call)
+    sync = await hm.sync_my_affiliations(db)
+
+    # Schedule re-match in background for each country with trends
+    countries_to_rematch = []
+    for code in TARGET_COUNTRIES:
+        trend_count = await db.trends.count_documents({"country_code": code})
+        if trend_count > 0:
+            countries_to_rematch.append(code)
+
+    execution_id = str(uuid.uuid4())
+    await db.product_executions.insert_one({
+        "id": execution_id,
+        "country_code": "ALL",
+        "kind": "rematch_all",
+        "limit": 10,
+        "auto_links": True,
+        "status": "pending",
+        "products_found": 0,
+        "countries": countries_to_rematch,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "error": None,
+    })
+
+    async def _run_rematch():
+        total_matched = 0
+        try:
+            await db.product_executions.update_one(
+                {"id": execution_id}, {"$set": {"status": "running"}}
+            )
+            for code in countries_to_rematch:
+                products = await hm.match_and_score(
+                    db=db,
+                    country_code=code,
+                    country_name=COUNTRIES[code]["name"],
+                    limit=10,
+                    auto_links=True,
+                )
+                mine = sum(1 for p in products if p.get("is_my_affiliation"))
+                total_matched += mine
+            await db.product_executions.update_one(
+                {"id": execution_id},
+                {"$set": {
+                    "status": "completed",
+                    "products_found": total_matched,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+        except Exception as e:
+            logger.exception(f"rematch-all {execution_id} failed: {e}")
+            await db.product_executions.update_one(
+                {"id": execution_id},
+                {"$set": {
+                    "status": "failed",
+                    "error": str(e)[:500],
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+
+    background_tasks.add_task(_run_rematch)
+
+    return {
+        "status": "started",
+        "execution_id": execution_id,
+        "synced_affiliations": sync.get("synced", 0),
+        "countries": countries_to_rematch,
+        "message": f"Sincronización completada ({sync.get('synced', 0)} afiliaciones). Rematch en background para {len(countries_to_rematch)} países.",
+    }
+
+
 @api_router.post("/products/match")
 async def match_products(payload: MatchRequest, background_tasks: BackgroundTasks):
     if payload.country_code not in COUNTRIES:

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="23" time="194.173" timestamp="2026-04-17T18:01:34.990519+00:00" hostname="agent-env-4e5d29d3-e57b-4001-bcfd-f2c73d171f3c"><testcase classname="tests.test_auto_sync.TestHotmartSyncAffiliations" name="test_sync_affiliations_returns_ok_status" time="60.111"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_auto_sync.py:21: in test_sync_affiliations_returns_ok_status
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_auto_sync.TestHotmartSyncAffiliations" name="test_sync_affiliations_returns_zero_for_empty_account" time="60.135"><failure message="requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='geo-trends-analyzer.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:534: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:571: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1415: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:330: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:291: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/socket.py:718: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1314: in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1166: in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:645: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:841: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:490: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:39: in reraise
+    raise value
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:787: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:536: in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:367: in _raise_timeout
+    raise ReadTimeoutError(
+E   urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='geo-trends-analyzer.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)
+
+During handling of the above exception, another exception occurred:
+tests/test_auto_sync.py:31: in test_sync_affiliations_returns_zero_for_empty_account
+    response = requests.post(f"{BASE_URL}/api/hotmart/sync-affiliations", timeout=60)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/api.py:115: in post
+    return request("post", url, data=data, json=json, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/api.py:59: in request
+    return session.request(method=method, url=url, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:592: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:706: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:691: in send
+    raise ReadTimeout(e, request=request)
+E   requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='geo-trends-analyzer.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)</failure></testcase><testcase classname="tests.test_auto_sync.TestHotmartRematchAll" name="test_rematch_all_returns_started_status" time="60.121"><failure message="assert 502 == 200&#10; +  where 502 = &lt;Response [502]&gt;.status_code">tests/test_auto_sync.py:48: in test_rematch_all_returns_started_status
+    assert response.status_code == 200
+E   assert 502 == 200
+E    +  where 502 = &lt;Response [502]&gt;.status_code</failure></testcase><testcase classname="tests.test_auto_sync.TestHotmartRematchAll" name="test_rematch_all_returns_synced_affiliations_count" time="7.447" /><testcase classname="tests.test_auto_sync.TestHotmartRematchAll" name="test_rematch_all_returns_countries_list" time="1.017" /><testcase classname="tests.test_auto_sync.TestProductExecutionTracking" name="test_execution_tracking_returns_status" time="0.743" /><testcase classname="tests.test_auto_sync.TestProductExecutionTracking" name="test_execution_tracking_has_kind_field" time="0.576" /><testcase classname="tests.test_auto_sync.TestProductsWithAffiliationFlag" name="test_products_have_is_my_affiliation_field" time="0.132" /><testcase classname="tests.test_auto_sync.TestProductsWithAffiliationFlag" name="test_products_without_real_affiliations_have_false_flag" time="0.161" /><testcase classname="tests.test_auto_sync.TestProductsWithAffiliationFlag" name="test_real_affiliation_product_has_true_flag" time="0.120" /><testcase classname="tests.test_auto_sync.TestExistingHotmartEndpoints" name="test_hotmart_status" time="0.126" /><testcase classname="tests.test_auto_sync.TestExistingHotmartEndpoints" name="test_hotmart_test_connection" time="0.482" /><testcase classname="tests.test_auto_sync.TestExistingHotmartEndpoints" name="test_hotmart_my_affiliations" time="0.380" /><testcase classname="tests.test_auto_sync.TestExistingHotmartEndpoints" name="test_hotmart_sales_summary" time="0.461" /><testcase classname="tests.test_auto_sync.TestExistingHotmartEndpoints" name="test_hotmart_sales_history" time="0.448" /><testcase classname="tests.test_auto_sync.TestExistingHotmartEndpoints" name="test_hotmart_commissions" time="0.546" /><testcase classname="tests.test_auto_sync.TestExistingProductEndpoints" name="test_products_match_endpoint" time="0.118" /><testcase classname="tests.test_auto_sync.TestExistingProductEndpoints" name="test_get_products_endpoint" time="0.121" /><testcase classname="tests.test_auto_sync.TestExistingProductEndpoints" name="test_manual_link_save_endpoint" time="0.256" /><testcase classname="tests.test_auto_sync.TestExistingProductEndpoints" name="test_manual_link_clear_endpoint" time="0.223" /><testcase classname="tests.test_auto_sync.TestMatchAndScorePipeline" name="test_real_affiliations_appear_first_in_results" time="0.129" /><testcase classname="tests.test_auto_sync.TestMatchAndScorePipeline" name="test_real_affiliation_has_auto_generated_link" time="0.123" /><testcase classname="tests.test_auto_sync.TestCleanup" name="test_cleanup_test_affiliation" time="0.000" /></testsuite></testsuites>

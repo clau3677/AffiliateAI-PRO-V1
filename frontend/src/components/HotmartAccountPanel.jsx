@@ -5,6 +5,7 @@ import {
     Handshake,
     ArrowClockwise,
     Receipt,
+    Lightning,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import {
@@ -13,6 +14,7 @@ import {
     fetchSalesHistory,
     fetchCommissions,
     testHotmartConnection,
+    rematchAllCountries,
 } from "../lib/api";
 
 function fmtMoney(value, currency = "USD") {
@@ -35,6 +37,7 @@ export default function HotmartAccountPanel() {
     const [history, setHistory] = useState([]);
     const [commissions, setCommissions] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -61,6 +64,23 @@ export default function HotmartAccountPanel() {
     useEffect(() => {
         load();
     }, [load]);
+
+    const handleSync = async () => {
+        setSyncing(true);
+        try {
+            const res = await rematchAllCountries();
+            toast.success(
+                `Sincronización iniciada: ${res.synced_affiliations} afiliaciones · rematch en ${res.countries.length} países (background, ~3 min)`,
+            );
+            await load();
+        } catch (e) {
+            toast.error(
+                e.response?.data?.detail || "No se pudo sincronizar Hotmart",
+            );
+        } finally {
+            setSyncing(false);
+        }
+    };
 
     const statusColor =
         connection?.status === "ok"
@@ -103,6 +123,20 @@ export default function HotmartAccountPanel() {
                                   : "Desconectado"}
                         </span>
                     </div>
+                    <button
+                        onClick={handleSync}
+                        disabled={syncing || connection?.status !== "ok"}
+                        data-testid="sync-affiliations-btn"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#09090b] text-white text-xs font-medium uppercase tracking-wide hover:bg-[#27272a] disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Sincroniza tus afiliaciones reales de Hotmart y las enlaza a las tendencias"
+                    >
+                        <Lightning
+                            size={12}
+                            weight="bold"
+                            className={syncing ? "animate-pulse" : ""}
+                        />
+                        {syncing ? "Sincronizando…" : "Sincronizar y enlazar"}
+                    </button>
                     <button
                         onClick={load}
                         disabled={loading}

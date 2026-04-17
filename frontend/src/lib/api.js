@@ -77,3 +77,7 @@ export const fetchCommissions = (maxResults = 10) =>
     api
         .get("/hotmart/commissions", { params: { max_results: maxResults } })
         .then((r) => r.data);
+export const syncAffiliations = () =>
+    api.post("/hotmart/sync-affiliations").then((r) => r.data);
+export const rematchAllCountries = () =>
+    api.post("/hotmart/rematch-all").then((r) => r.data);
