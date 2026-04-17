@@ -193,16 +193,16 @@ export default function HotmartAccountPanel() {
                                     Cuenta conectada. Aún no tienes afiliaciones activas.
                                 </p>
                                 <p>
-                                    Para activar el pipeline automático: afíliate a los
-                                    productos sugeridos desde{" "}
+                                    Para activar el pipeline automático: afíliate a
+                                    productos en el{" "}
                                     <a
-                                        href="https://app-vlc.hotmart.com/affiliates"
+                                        href="https://app.hotmart.com/market"
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="underline font-medium text-[#09090B]"
                                         data-testid="hotmart-affiliates-link"
                                     >
-                                        tu panel Hotmart
+                                        marketplace Hotmart
                                     </a>
                                     . Al volver, haz clic en{" "}
                                     <strong>"Sincronizar y auto-enlazar"</strong> y los
