@@ -439,6 +439,57 @@ class HotmartAffiliateAPI:
             ),
         }
 
+    async def _authed_get(self, path: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+        """Helper for authenticated GET requests to Hotmart API."""
+        if not hotmart_credentials_configured():
+            return {"error": "credentials_missing", "status": "credentials_missing"}
+        try:
+            token = await self._get_token()
+        except Exception as e:
+            return {"error": str(e), "status": "auth_failed"}
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{self.API_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params or {},
+            )
+            if resp.status_code >= 400:
+                try:
+                    body = resp.json()
+                    err = body.get("error_description") or body.get("message") or str(body)
+                except Exception:
+                    err = f"HTTP {resp.status_code}"
+                return {"status": f"api_error_{resp.status_code}", "error": err}
+            # Handle empty body (common for empty lists)
+            if not resp.content or not resp.text.strip():
+                return {"status": "ok", "items": [], "page_info": {"total_results": 0}}
+            try:
+                return {"status": "ok", **resp.json()}
+            except Exception:
+                return {"status": "ok", "items": [], "page_info": {"total_results": 0}, "note": "empty_body"}
+
+    async def list_my_affiliations(self, max_results: int = 50) -> Dict[str, Any]:
+        """Products the user is already affiliated to on Hotmart."""
+        return await self._authed_get(
+            "/affiliation/v2/affiliates/products",
+            {"max_results": max_results},
+        )
+
+    async def sales_history(self, max_results: int = 20) -> Dict[str, Any]:
+        return await self._authed_get(
+            "/payments/api/v1/sales/history",
+            {"max_results": max_results},
+        )
+
+    async def sales_summary(self) -> Dict[str, Any]:
+        return await self._authed_get("/payments/api/v1/sales/summary")
+
+    async def sales_commissions(self, max_results: int = 20) -> Dict[str, Any]:
+        return await self._authed_get(
+            "/payments/api/v1/sales/commissions",
+            {"max_results": max_results},
+        )
+
 
 # ========== Matching Engine ==========
 async def match_and_score(db, country_code: str, country_name: str, limit: int = 10, auto_links: bool = True) -> List[Dict]:

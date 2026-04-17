@@ -63,3 +63,17 @@ export const clearManualAffiliateLink = (code, hotmartId) =>
     api
         .delete(`/products/${code}/${hotmartId}/manual-link`)
         .then((r) => r.data);
+
+// ---- Hotmart live data ----
+export const fetchMyAffiliations = () =>
+    api.get("/hotmart/my-affiliations").then((r) => r.data);
+export const fetchSalesSummary = () =>
+    api.get("/hotmart/sales-summary").then((r) => r.data);
+export const fetchSalesHistory = (maxResults = 10) =>
+    api
+        .get("/hotmart/sales-history", { params: { max_results: maxResults } })
+        .then((r) => r.data);
+export const fetchCommissions = (maxResults = 10) =>
+    api
+        .get("/hotmart/commissions", { params: { max_results: maxResults } })
+        .then((r) => r.data);

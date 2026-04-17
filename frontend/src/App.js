@@ -8,6 +8,7 @@ import Navbar from "@/components/Navbar";
 import CountryCard from "@/components/CountryCard";
 import CountryDetail from "@/components/CountryDetail";
 import ExecutionStatus from "@/components/ExecutionStatus";
+import HotmartAccountPanel from "@/components/HotmartAccountPanel";
 
 import {
     fetchOverview,
@@ -168,6 +169,8 @@ function Dashboard() {
                 </section>
 
                 {execution && <ExecutionStatus execution={execution} />}
+
+                <HotmartAccountPanel />
 
                 {/* Countries grid */}
                 <section>

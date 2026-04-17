@@ -553,6 +553,34 @@ async def hotmart_test_connection():
     return await api.test_connection()
 
 
+@api_router.get("/hotmart/my-affiliations")
+async def hotmart_my_affiliations(max_results: int = 50):
+    """List products the user is already affiliated to on Hotmart."""
+    api = hm.HotmartAffiliateAPI()
+    return await api.list_my_affiliations(max_results=max_results)
+
+
+@api_router.get("/hotmart/sales-summary")
+async def hotmart_sales_summary():
+    """Sales summary from Hotmart (total sales, commissions)."""
+    api = hm.HotmartAffiliateAPI()
+    return await api.sales_summary()
+
+
+@api_router.get("/hotmart/sales-history")
+async def hotmart_sales_history(max_results: int = 20):
+    """Recent sales from Hotmart."""
+    api = hm.HotmartAffiliateAPI()
+    return await api.sales_history(max_results=max_results)
+
+
+@api_router.get("/hotmart/commissions")
+async def hotmart_commissions(max_results: int = 20):
+    """Recent affiliate commissions from Hotmart."""
+    api = hm.HotmartAffiliateAPI()
+    return await api.sales_commissions(max_results=max_results)
+
+
 @api_router.post("/products/match")
 async def match_products(payload: MatchRequest, background_tasks: BackgroundTasks):
     if payload.country_code not in COUNTRIES:
