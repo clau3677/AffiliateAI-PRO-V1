@@ -1,0 +1,87 @@
+{
+  "AR": {
+    "name": "Argentina",
+    "flag": "AR",
+    "currency": "ARS",
+    "language": "es",
+    "timezone": "America/Argentina/Buenos_Aires",
+    "trends_keywords": [
+      "cursos online",
+      "marketing digital",
+      "emprendimiento",
+      "finanzas personales",
+      "salud mental",
+      "trabajo remoto",
+      "inversiones",
+      "ingles online"
+    ]
+  },
+  "CL": {
+    "name": "Chile",
+    "flag": "CL",
+    "currency": "CLP",
+    "language": "es",
+    "timezone": "America/Santiago",
+    "trends_keywords": [
+      "inversiones",
+      "trabajo remoto",
+      "idiomas",
+      "programacion",
+      "bienestar",
+      "marketing digital",
+      "emprendimiento",
+      "fondos mutuos"
+    ]
+  },
+  "CO": {
+    "name": "Colombia",
+    "flag": "CO",
+    "currency": "COP",
+    "language": "es",
+    "timezone": "America/Bogota",
+    "trends_keywords": [
+      "negocios digitales",
+      "ventas online",
+      "liderazgo",
+      "belleza",
+      "cocina saludable",
+      "marketing digital",
+      "finanzas personales",
+      "emprendimiento"
+    ]
+  },
+  "PE": {
+    "name": "Perú",
+    "flag": "PE",
+    "currency": "PEN",
+    "language": "es",
+    "timezone": "America/Lima",
+    "trends_keywords": [
+      "educacion financiera",
+      "marketing digital",
+      "desarrollo personal",
+      "tecnologia",
+      "salud mental",
+      "trabajo remoto",
+      "cursos online",
+      "emprendimiento"
+    ]
+  },
+  "BR": {
+    "name": "Brasil",
+    "flag": "BR",
+    "currency": "BRL",
+    "language": "pt",
+    "timezone": "America/Sao_Paulo",
+    "trends_keywords": [
+      "marketing digital",
+      "vendas online",
+      "investimentos",
+      "saude mental",
+      "desenvolvimento pessoal",
+      "trabalho remoto",
+      "empreendedorismo",
+      "cursos online"
+    ]
+  }
+}
