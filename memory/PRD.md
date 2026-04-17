@@ -29,6 +29,16 @@ Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, P
 - Toasts (sonner) para feedback del usuario.
 - 100% test pass (19 backend + 8 frontend).
 
+## Module 2 Implemented (2026-04-17)
+- **Hotmart Marketplace Scraper** (`hotmart.py`): BeautifulSoup + httpx con detección anti-bot (Cloudflare). Best-effort; devuelve [] si bloqueado.
+- **LLM Fallback** (Claude Sonnet 4.5): genera productos Hotmart-style plausibles (`ai_*` IDs) cuando el scraping falla. Producción de alta calidad con contexto cultural (ej: "Dólar Refugio", "Emprendedor Anticrisis", "Mente en Calma").
+- **Affiliate API Client** (OAuth2 client_credentials): handling graceful cuando faltan credenciales → devuelve `credentials_missing` status. Productos sintéticos devuelven `synthetic_product`.
+- **Matching Engine**: scoring combinado (relevance 60% + profitability 40%). Profitability = `commission × rating × volume_factor`. Relevance = match de keywords en título/categoría.
+- **Endpoints**: `/api/hotmart/status`, `/api/products/match` (POST), `/api/products/executions/{id}`, `/api/products/{code}` (GET/DELETE), `/api/products/{code}/{hotmart_id}/affiliate-link`.
+- **Scheduler APScheduler**: refresco semanal domingos 03:00 UTC (scraping + matching + hotlinks condicionales).
+- **Frontend**: tabs dentro del detalle de país (Tendencias / Productos Hotmart), `ProductCard` con comisión/rating/score/pain chips, banner de credenciales pendientes, botones "Generar link" → "Copiar mi link" según status.
+- 100% test pass adicional (15 backend + 8 frontend = **42 tests totales**).
+
 ## Backlog
 - **P0 — Módulo 2 (Hotmart Product Selector)**: integrar `hotmart-python` SDK oficial. Matching automático pain_point → producto. Ranking por comisión/rating/conversión.
 - **P1**: Programar ejecuciones automáticas (cron / scheduler) para refrescar tendencias semanalmente.
