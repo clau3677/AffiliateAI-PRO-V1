@@ -6,7 +6,6 @@ import {
     ArrowClockwise,
     Receipt,
     Lightning,
-    Rocket,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import {
@@ -17,7 +16,6 @@ import {
     testHotmartConnection,
     rematchAllCountries,
 } from "../lib/api";
-import ExpressAffiliationWizard from "./ExpressAffiliationWizard";
 
 function fmtMoney(value, currency = "USD") {
     if (value === null || value === undefined) return "—";
@@ -40,7 +38,6 @@ export default function HotmartAccountPanel() {
     const [commissions, setCommissions] = useState([]);
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
-    const [wizardOpen, setWizardOpen] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -127,16 +124,6 @@ export default function HotmartAccountPanel() {
                         </span>
                     </div>
                     <button
-                        onClick={() => setWizardOpen(true)}
-                        disabled={connection?.status !== "ok"}
-                        data-testid="open-wizard-btn"
-                        className="inline-flex items-center gap-1.5 px-3 py-2 hard-border surface-hover text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Asistente express: afíliate a 10 productos en 60 segundos"
-                    >
-                        <Rocket size={12} weight="bold" />
-                        Asistente Express
-                    </button>
-                    <button
                         onClick={handleSync}
                         disabled={syncing || connection?.status !== "ok"}
                         data-testid="sync-affiliations-btn"
@@ -148,7 +135,7 @@ export default function HotmartAccountPanel() {
                             weight="bold"
                             className={syncing ? "animate-pulse" : ""}
                         />
-                        {syncing ? "Sincronizando…" : "Sincronizar y enlazar"}
+                        {syncing ? "Sincronizando…" : "Sincronizar y auto-enlazar"}
                     </button>
                     <button
                         onClick={load}
@@ -203,21 +190,23 @@ export default function HotmartAccountPanel() {
                             <ChartLineUp size={18} weight="bold" className="mt-0.5" />
                             <div>
                                 <p className="font-semibold text-[#09090B] mb-1">
-                                    Cuenta conectada y lista para operar.
+                                    Cuenta conectada. Aún no tienes afiliaciones activas.
                                 </p>
                                 <p>
-                                    La API responde con tus datos en tiempo real. Cuando te
-                                    afilies a un producto en{" "}
+                                    Para activar el pipeline automático: afíliate a los
+                                    productos sugeridos desde{" "}
                                     <a
                                         href="https://app-vlc.hotmart.com/affiliates"
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="underline font-medium text-[#09090B]"
+                                        data-testid="hotmart-affiliates-link"
                                     >
-                                        Hotmart
-                                    </a>{" "}
-                                    o generes tu primera venta, los números aparecerán aquí
-                                    automáticamente.
+                                        tu panel Hotmart
+                                    </a>
+                                    . Al volver, haz clic en{" "}
+                                    <strong>"Sincronizar y auto-enlazar"</strong> y los
+                                    hotlinks aparecerán automáticamente en cada país.
                                 </p>
                             </div>
                         </div>
@@ -274,13 +263,6 @@ export default function HotmartAccountPanel() {
                         ))}
                     </div>
                 </div>
-            )}
-
-            {wizardOpen && (
-                <ExpressAffiliationWizard
-                    onClose={() => setWizardOpen(false)}
-                    onDone={load}
-                />
             )}
         </section>
     );

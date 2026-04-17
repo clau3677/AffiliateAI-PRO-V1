@@ -583,61 +583,6 @@ async def hotmart_commissions(max_results: int = 20):
 
 
 
-@api_router.get("/hotmart/express-wizard")
-async def hotmart_express_wizard(per_country: int = 2, max_total: int = 10):
-    """
-    Asistente Express: devuelve las TOP N oportunidades por país con URLs de búsqueda
-    en el marketplace de Hotmart pre-rellenadas. El usuario abre los tabs, hace clic
-    'Afiliarme' en los productos que quiera, y vuelve aquí para sincronizar.
-    """
-    by_score: List[Dict[str, Any]] = []
-    for code in TARGET_COUNTRIES:
-        cursor = db.trends.find(
-            {"country_code": code, "commercial_intent": {"$in": ["Alta", "Media"]}},
-            {"_id": 0, "keyword": 1, "country_code": 1, "country_name": 1,
-             "pain_point": 1, "commercial_intent": 1, "priority_score": 1,
-             "suggested_product_type": 1},
-        ).sort("priority_score", -1).limit(per_country)
-        items = await cursor.to_list(length=per_country)
-        for t in items:
-            keyword = t["keyword"]
-            by_score.append({
-                "country_code": code,
-                "country_name": COUNTRIES[code]["name"],
-                "keyword": keyword,
-                "pain_point": t.get("pain_point"),
-                "commercial_intent": t.get("commercial_intent"),
-                "priority_score": t.get("priority_score"),
-                "suggested_product_type": t.get("suggested_product_type"),
-                "hotmart_search_url": f"https://hotmart.com/es/marketplace/productos?q={keyword.replace(' ', '+')}",
-                "hotmart_discovery_url": (
-                    f"https://hotmart.com/{'pt-br' if code == 'BR' else 'es'}"
-                    f"/marketplace/productos?q={keyword.replace(' ', '+')}"
-                ),
-            })
-
-    by_score.sort(key=lambda x: x.get("priority_score") or 0, reverse=True)
-    return {
-        "status": "ok",
-        "total": min(len(by_score), max_total),
-        "opportunities": by_score[:max_total],
-        "instructions": (
-            "1. Haz clic en 'Abrir todas' para abrir los marketplaces en pestañas nuevas. "
-            "2. En cada pestaña de Hotmart, busca un producto con buena comisión y clic en 'Afiliarme ahora'. "
-            "3. Vuelve aquí y haz clic en 'Sincronizar' — tus hotlinks aparecerán automáticamente."
-        ),
-    }
-
-
-@api_router.post("/hotmart/sync-affiliations")
-async def hotmart_sync_affiliations():
-    """Pulls user's real Hotmart affiliations into MongoDB for auto-linking."""
-    if not hm.hotmart_credentials_configured():
-        raise HTTPException(status_code=400, detail="Credenciales Hotmart no configuradas")
-    result = await hm.sync_my_affiliations(db)
-    return result
-
-
 @api_router.post("/hotmart/rematch-all")
 async def hotmart_rematch_all(background_tasks: BackgroundTasks):
     """After syncing affiliations, re-run matching for every country so real hotlinks are attached."""
@@ -804,49 +749,6 @@ async def get_or_generate_affiliate_link(country_code: str, hotmart_id: str, for
             }},
         )
     return {"hotmart_id": hotmart_id, **result}
-
-
-class ManualLinkPayload(BaseModel):
-    affiliate_link: str
-
-
-@api_router.patch("/products/{country_code}/{hotmart_id}/manual-link")
-async def save_manual_affiliate_link(country_code: str, hotmart_id: str, payload: ManualLinkPayload):
-    """User pastes their own hotlink after self-affiliating on Hotmart."""
-    link = payload.affiliate_link.strip()
-    if not link:
-        raise HTTPException(status_code=400, detail="Link vacío")
-    if "hotmart.com" not in link.lower():
-        raise HTTPException(status_code=400, detail="El link debe contener 'hotmart.com' (ej: go.hotmart.com/...)")
-
-    result = await db.products.update_one(
-        {"country_code": country_code, "hotmart_id": hotmart_id},
-        {"$set": {
-            "affiliate_link": link,
-            "affiliate_status": "manual",
-            "affiliate_link_generated_at": datetime.now(timezone.utc).isoformat(),
-            "tracking_id": "manual",
-        }},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
-    return {"status": "saved", "affiliate_link": link}
-
-
-@api_router.delete("/products/{country_code}/{hotmart_id}/manual-link")
-async def clear_manual_affiliate_link(country_code: str, hotmart_id: str):
-    result = await db.products.update_one(
-        {"country_code": country_code, "hotmart_id": hotmart_id},
-        {"$set": {
-            "affiliate_link": None,
-            "affiliate_status": "pending",
-            "tracking_id": None,
-            "affiliate_link_generated_at": None,
-        }},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
-    return {"status": "cleared"}
 
 
 @api_router.delete("/products/{country_code}")

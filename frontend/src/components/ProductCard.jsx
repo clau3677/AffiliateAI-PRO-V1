@@ -1,75 +1,27 @@
-import React, { useState } from "react";
+import React from "react";
 import {
     Copy,
     ArrowSquareOut,
     Sparkle,
-    CheckCircle,
     Star,
-    FloppyDisk,
-    X as XIcon,
-    Link as LinkIcon,
-    Info,
     Lightning,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import {
-    saveManualAffiliateLink,
-    clearManualAffiliateLink,
-} from "../lib/api";
 
-export default function ProductCard({ product, countryCode, index = 0, onUpdated }) {
-    const [linkInput, setLinkInput] = useState(product.affiliate_link || "");
-    const [saving, setSaving] = useState(false);
-    const [showHelp, setShowHelp] = useState(false);
+const HOTMART_AFFILIATES_PANEL = "https://app-vlc.hotmart.com/affiliates";
+
+export default function ProductCard({ product, index = 0 }) {
     const isFallback = product.is_fallback;
     const isMyAffiliation = product.is_my_affiliation;
     const hasLink =
         product.affiliate_link &&
         ["generated", "cached", "manual"].includes(product.affiliate_status);
 
-    const handleOpenHotmart = () => {
-        window.open(product.product_url, "_blank", "noopener,noreferrer");
-        setShowHelp(true);
-    };
-
-    const handleSave = async () => {
-        const link = linkInput.trim();
-        if (!link) {
-            toast.warning("Pega tu link de afiliado primero");
-            return;
-        }
-        setSaving(true);
-        try {
-            await saveManualAffiliateLink(countryCode, product.hotmart_id, link);
-            toast.success("Link guardado");
-            setShowHelp(false);
-            onUpdated && onUpdated();
-        } catch (e) {
-            toast.error(e.response?.data?.detail || "No se pudo guardar");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleClear = async () => {
-        setSaving(true);
-        try {
-            await clearManualAffiliateLink(countryCode, product.hotmart_id);
-            setLinkInput("");
-            toast.success("Link eliminado");
-            onUpdated && onUpdated();
-        } catch {
-            toast.error("No se pudo eliminar");
-        } finally {
-            setSaving(false);
-        }
-    };
-
     const handleCopy = async () => {
         if (!product.affiliate_link) return;
         try {
             await navigator.clipboard.writeText(product.affiliate_link);
-            toast.success("Link copiado al portapapeles");
+            toast.success("Hotlink copiado al portapapeles");
         } catch {
             toast.error("No se pudo copiar");
         }
@@ -172,8 +124,8 @@ export default function ProductCard({ product, countryCode, index = 0, onUpdated
                 </div>
             )}
 
-            {/* Affiliate flow — auto if real affiliation, manual otherwise */}
-            <div className="hard-border-t pt-4 space-y-3">
+            {/* Affiliate flow — fully automated */}
+            <div className="hard-border-t pt-4 space-y-2">
                 {isMyAffiliation && hasLink ? (
                     <div
                         className="hard-border p-3 flex items-center gap-2 text-xs"
@@ -181,7 +133,7 @@ export default function ProductCard({ product, countryCode, index = 0, onUpdated
                         data-testid={`auto-link-ready-${product.hotmart_id}`}
                     >
                         <Lightning size={13} weight="fill" color="#16A34A" />
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                             <div
                                 className="font-semibold"
                                 style={{ color: "#166534" }}
@@ -202,124 +154,44 @@ export default function ProductCard({ product, countryCode, index = 0, onUpdated
                         </button>
                     </div>
                 ) : (
-                    <>
-                        {!hasLink && (
-                            <button
-                                data-testid={`open-hotmart-${product.hotmart_id}`}
-                                onClick={handleOpenHotmart}
-                                className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 bg-[#09090b] text-white text-xs font-medium uppercase tracking-wide hover:bg-[#27272a] transition-colors"
-                            >
-                                <ArrowSquareOut size={14} weight="bold" />
-                                Afiliarme en Hotmart
-                            </button>
-                        )}
-
-                        {showHelp && !hasLink && (
-                            <div
-                                className="hard-border p-3 text-xs leading-relaxed space-y-1.5"
-                                style={{ background: "#FEF3C7", borderColor: "#FCD34D" }}
-                                data-testid="manual-help"
-                            >
-                                <div className="flex items-start gap-2">
-                                    <Info size={13} weight="bold" className="mt-0.5 flex-shrink-0" />
-                                    <div className="flex-1">
-                                        <div className="font-semibold mb-1">
-                                            3 pasos rápidos (≈15 seg):
-                                        </div>
-                                        <ol className="list-decimal list-inside space-y-0.5 text-[#52525B]">
-                                            <li>En Hotmart: clic en "Afiliarme".</li>
-                                            <li>
-                                                Vuelve y haz clic en{" "}
-                                                <strong>"Sincronizar y enlazar"</strong> arriba — el link se cargará automáticamente.
-                                            </li>
-                                            <li>O pega manualmente abajo.</li>
-                                        </ol>
-                                    </div>
-                                    <button
-                                        onClick={() => setShowHelp(false)}
-                                        className="p-1 hover:bg-[#FDE68A]"
-                                        aria-label="Cerrar ayuda"
-                                    >
-                                        <XIcon size={11} weight="bold" />
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        <div>
-                            <div className="overline mb-1.5 flex items-center gap-1.5">
-                                <LinkIcon size={10} weight="bold" />
-                                Tu link de afiliado (manual)
-                            </div>
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    data-testid={`link-input-${product.hotmart_id}`}
-                                    value={linkInput}
-                                    onChange={(e) => setLinkInput(e.target.value)}
-                                    placeholder="https://go.hotmart.com/..."
-                                    className="flex-1 px-3 py-2 hard-border text-xs mono bg-white outline-none focus:border-[#09090b]"
-                                    disabled={saving}
-                                />
-                                {!hasLink ? (
-                                    <button
-                                        data-testid={`save-link-${product.hotmart_id}`}
-                                        onClick={handleSave}
-                                        disabled={saving || !linkInput.trim()}
-                                        className="inline-flex items-center gap-1 px-3 py-2 hard-border surface-hover text-xs font-medium disabled:opacity-50"
-                                    >
-                                        <FloppyDisk size={12} weight="bold" />
-                                        Guardar
-                                    </button>
-                                ) : (
-                                    <button
-                                        data-testid={`clear-link-${product.hotmart_id}`}
-                                        onClick={handleClear}
-                                        disabled={saving}
-                                        className="inline-flex items-center gap-1 px-3 py-2 hard-border surface-hover text-xs font-medium disabled:opacity-50"
-                                        title="Eliminar link guardado"
-                                    >
-                                        <XIcon size={12} weight="bold" />
-                                    </button>
-                                )}
-                            </div>
+                    <div className="space-y-2">
+                        <div
+                            className="hard-border p-2.5 text-[11px] leading-relaxed"
+                            style={{ background: "#FEF3C7", borderColor: "#FCD34D" }}
+                            data-testid={`not-affiliated-${product.hotmart_id}`}
+                        >
+                            <span style={{ color: "#92400E" }} className="font-semibold">
+                                Aún no estás afiliado.
+                            </span>{" "}
+                            <span style={{ color: "#52525B" }}>
+                                Afíliate en Hotmart y pulsa "Sincronizar y auto-enlazar"
+                                arriba. El hotlink aparecerá automáticamente.
+                            </span>
                         </div>
-
-                        {hasLink && !isMyAffiliation && (
-                            <div
-                                className="hard-border p-2.5 flex items-center gap-2 text-xs"
-                                style={{ background: "#DCFCE7", borderColor: "#86EFAC" }}
-                                data-testid={`link-saved-${product.hotmart_id}`}
+                        <div className="grid grid-cols-2 gap-2">
+                            <a
+                                href={product.product_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-testid={`open-product-${product.hotmart_id}`}
+                                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 hard-border surface-hover text-[11px] font-medium uppercase tracking-wide"
                             >
-                                <CheckCircle size={13} weight="fill" color="#16A34A" />
-                                <span
-                                    className="font-medium"
-                                    style={{ color: "#166534" }}
-                                >
-                                    Link guardado
-                                </span>
-                                <button
-                                    data-testid={`copy-link-${product.hotmart_id}`}
-                                    onClick={handleCopy}
-                                    className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 bg-[#09090b] text-white font-medium text-[11px] uppercase tracking-wide hover:bg-[#27272a]"
-                                >
-                                    <Copy size={11} weight="bold" />
-                                    Copiar
-                                </button>
-                            </div>
-                        )}
-                    </>
+                                <ArrowSquareOut size={12} weight="bold" />
+                                Ver producto
+                            </a>
+                            <a
+                                href={HOTMART_AFFILIATES_PANEL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-testid={`open-affiliates-${product.hotmart_id}`}
+                                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-[#09090b] text-white text-[11px] font-medium uppercase tracking-wide hover:bg-[#27272a]"
+                            >
+                                <Lightning size={12} weight="bold" />
+                                Afiliarme
+                            </a>
+                        </div>
+                    </div>
                 )}
-
-                <a
-                    href={product.product_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-testid={`view-product-${product.hotmart_id}`}
-                    className="block text-center text-[11px] text-[#52525B] hover:text-[#09090b] underline"
-                >
-                    Ver producto en Hotmart →
-                </a>
             </div>
         </article>
     );

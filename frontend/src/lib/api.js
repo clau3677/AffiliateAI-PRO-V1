@@ -53,16 +53,6 @@ export const generateAffiliateLink = (code, hotmartId, force = false) =>
         .then((r) => r.data);
 export const clearProducts = (code) =>
     api.delete(`/products/${code}`).then((r) => r.data);
-export const saveManualAffiliateLink = (code, hotmartId, link) =>
-    api
-        .patch(`/products/${code}/${hotmartId}/manual-link`, {
-            affiliate_link: link,
-        })
-        .then((r) => r.data);
-export const clearManualAffiliateLink = (code, hotmartId) =>
-    api
-        .delete(`/products/${code}/${hotmartId}/manual-link`)
-        .then((r) => r.data);
 
 // ---- Hotmart live data ----
 export const fetchMyAffiliations = () =>
@@ -77,13 +67,5 @@ export const fetchCommissions = (maxResults = 10) =>
     api
         .get("/hotmart/commissions", { params: { max_results: maxResults } })
         .then((r) => r.data);
-export const syncAffiliations = () =>
-    api.post("/hotmart/sync-affiliations").then((r) => r.data);
 export const rematchAllCountries = () =>
     api.post("/hotmart/rematch-all").then((r) => r.data);
-export const fetchExpressWizard = (perCountry = 2, maxTotal = 10) =>
-    api
-        .get("/hotmart/express-wizard", {
-            params: { per_country: perCountry, max_total: maxTotal },
-        })
-        .then((r) => r.data);
