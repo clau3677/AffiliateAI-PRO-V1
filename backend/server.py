@@ -25,6 +25,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import hotmart as hm
+import hotmart_rpa as rpa
 
 
 # ---------- Bootstrap ----------
@@ -749,6 +750,166 @@ async def clear_products(country_code: str):
         raise HTTPException(status_code=400, detail=f"País no soportado. Usa: {TARGET_COUNTRIES}")
     result = await db.products.delete_many({"country_code": country_code})
     return {"deleted": result.deleted_count, "country_code": country_code}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Módulo RPA: Automatización de Login, Afiliación y Extracción de Códigos
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RPAStartRequest(BaseModel):
+    keywords: List[str] = Field(..., min_items=1, max_items=10)
+    country_code: str = Field(default="CL")
+    manual_2fa_code: Optional[str] = None
+    headless: bool = True
+
+
+@api_router.get("/rpa/status")
+async def rpa_status():
+    """Estado del módulo RPA y configuración de credenciales."""
+    return {
+        "module": "RPA - Automatización Hotmart",
+        "rpa_credentials_configured": rpa.rpa_credentials_configured(),
+        "email_2fa_configured": rpa.email_2fa_configured(),
+        "playwright_required": True,
+        "description": (
+            "Agente RPA que automatiza login, afiliación y extracción de "
+            "códigos de afiliado en Hotmart usando Playwright."
+        ),
+        "required_env_vars": {
+            "HOTMART_EMAIL": "Email de tu cuenta Hotmart",
+            "HOTMART_PASSWORD": "Contraseña de tu cuenta Hotmart",
+            "GMAIL_EMAIL": "(Opcional) Email para 2FA automático",
+            "GMAIL_APP_PASSWORD": "(Opcional) Contraseña de app de Gmail para 2FA",
+            "IMAP_SERVER": "(Opcional) Servidor IMAP, default: imap.gmail.com",
+        },
+    }
+
+
+@api_router.post("/rpa/start")
+async def rpa_start(payload: RPAStartRequest, background_tasks: BackgroundTasks):
+    """
+    Inicia una sesión RPA en background.
+    El agente hará login en Hotmart, buscará productos por keywords,
+    se afiliará automáticamente y extraerá los códigos de afiliado.
+    """
+    if not rpa.rpa_credentials_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Credenciales RPA no configuradas. Agrega HOTMART_EMAIL y HOTMART_PASSWORD en backend/.env",
+        )
+
+    if payload.country_code not in COUNTRIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"País no soportado. Usa: {TARGET_COUNTRIES}",
+        )
+
+    session_id = rpa.rpa_manager.create_session(
+        keywords=payload.keywords,
+        country_code=payload.country_code,
+    )
+
+    background_tasks.add_task(
+        rpa.rpa_manager.run_session,
+        session_id=session_id,
+        manual_2fa_code=payload.manual_2fa_code,
+        headless=payload.headless,
+    )
+
+    return {
+        "session_id": session_id,
+        "status": "started",
+        "keywords": payload.keywords,
+        "country_code": payload.country_code,
+        "message": (
+            f"Sesión RPA iniciada. El agente hará login en Hotmart, buscará "
+            f"{len(payload.keywords)} keyword(s) y extraerá códigos de afiliado. "
+            f"Monitorea el progreso en /api/rpa/sessions/{session_id}"
+        ),
+    }
+
+
+@api_router.get("/rpa/sessions")
+async def rpa_list_sessions(limit: int = 20):
+    """Lista todas las sesiones RPA recientes."""
+    return rpa.rpa_manager.list_sessions(limit=limit)
+
+
+@api_router.get("/rpa/sessions/{session_id}")
+async def rpa_get_session(session_id: str):
+    """Obtiene el estado y resultado de una sesión RPA específica."""
+    session = rpa.rpa_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión RPA no encontrada")
+    return session
+
+
+@api_router.post("/rpa/sessions/{session_id}/2fa")
+async def rpa_provide_2fa(session_id: str, code: str, background_tasks: BackgroundTasks):
+    """
+    Proporciona un código 2FA manualmente para una sesión RPA en espera.
+    Útil cuando el 2FA automático por correo no está configurado.
+    """
+    session = rpa.rpa_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión RPA no encontrada")
+    if session["status"] not in ("pending", "waiting_2fa"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"La sesión no está esperando 2FA. Estado actual: {session['status']}",
+        )
+
+    rpa.rpa_manager.update_session(session_id, status="2fa_provided", manual_2fa_code=code)
+    background_tasks.add_task(
+        rpa.rpa_manager.run_session,
+        session_id=session_id,
+        manual_2fa_code=code,
+    )
+    return {"status": "2fa_accepted", "session_id": session_id}
+
+
+@api_router.post("/rpa/save-affiliations")
+async def rpa_save_affiliations_to_db(session_id: str):
+    """
+    Guarda los resultados de una sesión RPA completada en MongoDB,
+    actualizando los productos con los códigos de afiliado extraídos.
+    """
+    session = rpa.rpa_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Sesión RPA no encontrada")
+    if session["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"La sesión no está completada. Estado: {session['status']}",
+        )
+
+    result = session.get("result", {})
+    affiliations = result.get("affiliations", [])
+    saved = 0
+
+    for aff in affiliations:
+        if not aff.get("product_id") or not aff.get("affiliate_code"):
+            continue
+        await db.products.update_many(
+            {"hotmart_id": aff["product_id"]},
+            {
+                "$set": {
+                    "affiliate_code": aff["affiliate_code"],
+                    "affiliate_link": aff.get("hotlink"),
+                    "affiliate_status": "generated",
+                    "tracking_id": aff["affiliate_code"],
+                    "rpa_extracted_at": aff.get("extracted_at"),
+                }
+            },
+        )
+        saved += 1
+
+    return {
+        "status": "saved",
+        "session_id": session_id,
+        "affiliations_saved": saved,
+        "total_affiliations": len(affiliations),
+    }
 
 
 app.include_router(api_router)

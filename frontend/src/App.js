@@ -9,6 +9,7 @@ import CountryCard from "@/components/CountryCard";
 import CountryDetail from "@/components/CountryDetail";
 import ExecutionStatus from "@/components/ExecutionStatus";
 import HotmartAccountPanel from "@/components/HotmartAccountPanel";
+import RPAAgentPanel from "@/components/RPAAgentPanel";
 
 import {
     fetchOverview,
@@ -171,6 +172,15 @@ function Dashboard() {
                 {execution && <ExecutionStatus execution={execution} />}
 
                 <HotmartAccountPanel />
+
+                {/* RPA Agent Panel */}
+                <section className="widget-enter">
+                    <div className="overline mb-2">Automatización</div>
+                    <h2 className="font-display text-2xl sm:text-3xl tracking-tight font-semibold mb-6">
+                        Agente RPA Hotmart
+                    </h2>
+                    <RPAAgentPanel />
+                </section>
 
                 {/* Countries grid */}
                 <section>

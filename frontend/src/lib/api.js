@@ -69,3 +69,24 @@ export const fetchCommissions = (maxResults = 10) =>
         .then((r) => r.data);
 export const rematchAllCountries = () =>
     api.post("/hotmart/rematch-all").then((r) => r.data);
+
+// ---- Módulo RPA: Automatización Hotmart ----
+export const fetchRPAStatus = () =>
+    api.get("/rpa/status").then((r) => r.data);
+export const startRPASession = (keywords, countryCode, manual2fa = null, headless = true) =>
+    api
+        .post("/rpa/start", {
+            keywords,
+            country_code: countryCode,
+            manual_2fa_code: manual2fa,
+            headless,
+        })
+        .then((r) => r.data);
+export const fetchRPASession = (sessionId) =>
+    api.get(`/rpa/sessions/${sessionId}`).then((r) => r.data);
+export const fetchRPASessions = (limit = 20) =>
+    api.get("/rpa/sessions", { params: { limit } }).then((r) => r.data);
+export const provide2FACode = (sessionId, code) =>
+    api.post(`/rpa/sessions/${sessionId}/2fa`, null, { params: { code } }).then((r) => r.data);
+export const saveRPAAffiliations = (sessionId) =>
+    api.post("/rpa/save-affiliations", null, { params: { session_id: sessionId } }).then((r) => r.data);
