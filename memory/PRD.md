@@ -26,7 +26,19 @@ Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, P
 - Orquestador background con delays éticos; fallback heurístico si LLM falla.
 - Upsert `(country_code, keyword)` sin duplicados.
 
-### Módulo 2 — Hotmart automatizado (iteración actual)
+### Módulo 2 — Hotmart 100% REAL (iteración 2026-04-18)
+- **Cero productos mockup/IA**. Eliminadas funciones `llm_generate_products`, `_deterministic_products` y la generación de IDs sintéticos `ai_*`, `det_*`, `hm_*`.
+- **Nuevo scraper real del marketplace**: parsea `__NEXT_DATA__` del HTML público de `hotmart.com/{es|pt-br}/marketplace/productos?search={kw}` y extrae productos con `productId`, `slug`, `rating`, `totalReviews`, `ownerName`, `category` reales.
+- `match_and_score` ahora:
+  1. Sincroniza afiliaciones del usuario (1ra prioridad).
+  2. Scrapea marketplace por cada keyword del trend (5 países, hasta 5 keywords c/u).
+  3. Hace dedupe por `productId`, scoring por rating × popularidad × match de keywords.
+  4. Borra productos cacheados del país antes de hacer upsert (evita mocks stale).
+  5. Si no hay ni afiliaciones ni scraping, devuelve `[]` (empty state útil en UI).
+- **ProductCard simplificado**: eliminado badge "IA", `is_fallback`, y todo manual-link. Comisión se muestra `—` cuando no está disponible públicamente (se actualiza al sincronizar afiliación).
+- Verificado: 50 productos reales para AR/CL/CO/PE/BR, con IDs reales (616776, 1939060, 820424, 1364507...) y URLs funcionales al marketplace.
+
+### Módulo 2 — Hotmart automatizado (iteración previa 2026-04-17)
 - Credenciales OAuth Hotmart configuradas con scopes productivos. `test-connection` devuelve `scopes_ok:true`.
 - **Pipeline automático único**: `POST /api/hotmart/rematch-all` sincroniza afiliaciones reales + reejecuta matching para los 5 países en background.
 - `match_and_score` (backend/hotmart.py) prioriza siempre `is_my_affiliation=true` con hotlink real; rellena con discovery (scraping + LLM) cuando hay menos afiliaciones que el limit.

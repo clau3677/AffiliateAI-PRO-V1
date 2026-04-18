@@ -2,35 +2,26 @@ import React from "react";
 import {
     Copy,
     ArrowSquareOut,
-    Sparkle,
     Star,
     Lightning,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function ProductCard({ product, countryCode, index = 0 }) {
-    const isFallback = product.is_fallback;
     const isMyAffiliation = product.is_my_affiliation;
     const hasLink =
         product.affiliate_link &&
         ["generated", "cached", "manual"].includes(product.affiliate_status);
 
-    // Keyword to search on Hotmart marketplace — use the first matched pain point
-    // or fall back to the product title. This gives the user REAL products to affiliate to.
+    // Marketplace search URL using the first matched pain point (used by "Afiliarme"
+    // and as a safety fallback for "Ver producto" if the real URL is missing).
     const searchKeyword =
         (product.matched_pain_points && product.matched_pain_points[0]) ||
         product.title ||
         "";
     const marketLocale = countryCode === "BR" ? "pt-br" : "es";
-    const marketplaceSearchUrl = `https://hotmart.com/${marketLocale}/marketplace/productos?q=${encodeURIComponent(searchKeyword)}`;
-
-    // "Ver producto" URL:
-    //  - Real scraped product → use its real product_url
-    //  - IA/synthetic product (ai_/det_/hm_ prefix) → use marketplace search (avoids dead placeholder URLs)
-    const viewProductUrl =
-        isFallback || /^(ai_|det_|hm_)/.test(String(product.hotmart_id))
-            ? marketplaceSearchUrl
-            : product.product_url || marketplaceSearchUrl;
+    const marketplaceSearchUrl = `https://hotmart.com/${marketLocale}/marketplace/productos?search=${encodeURIComponent(searchKeyword)}`;
+    const viewProductUrl = product.product_url || marketplaceSearchUrl;
 
     const handleCopy = async () => {
         if (!product.affiliate_link) return;
@@ -44,6 +35,7 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
 
     const scoreColor = (s) =>
         s >= 80 ? "#DC2626" : s >= 60 ? "#D97706" : "#2563EB";
+    const commission = Number(product.commission_percent) || 0;
 
     return (
         <article
@@ -80,20 +72,6 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                             Mi afiliación
                         </span>
                     )}
-                    {isFallback && (
-                        <span
-                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold tracking-widest"
-                            style={{
-                                background: "#DBEAFE",
-                                color: "#1E40AF",
-                                border: "1px solid #93C5FD",
-                            }}
-                            title="Sugerido por IA (Claude Sonnet 4.5)"
-                        >
-                            <Sparkle size={9} weight="fill" />
-                            IA
-                        </span>
-                    )}
                 </div>
             </header>
 
@@ -101,7 +79,7 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                 <div>
                     <div className="overline">Comisión</div>
                     <div className="mono text-lg font-semibold mt-0.5">
-                        {Math.round(product.commission_percent)}%
+                        {commission > 0 ? `${Math.round(commission)}%` : "—"}
                     </div>
                 </div>
                 <div>
@@ -139,7 +117,7 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                 </div>
             )}
 
-            {/* Affiliate flow — fully automated */}
+            {/* Affiliate flow — fully automated, no manual inputs */}
             <div className="hard-border-t pt-4 space-y-2">
                 {isMyAffiliation && hasLink ? (
                     <div
@@ -176,12 +154,11 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                             data-testid={`not-affiliated-${product.hotmart_id}`}
                         >
                             <span style={{ color: "#92400E" }} className="font-semibold">
-                                Aún no estás afiliado.
+                                Producto real del marketplace.
                             </span>{" "}
                             <span style={{ color: "#52525B" }}>
-                                Abre el marketplace de Hotmart con la búsqueda prellenada,
-                                afíliate al producto real que prefieras y vuelve a pulsar
-                                "Sincronizar y auto-enlazar" arriba.
+                                Ábrelo, pulsa "Afiliarme" en Hotmart, vuelve aquí y dale a
+                                "Sincronizar y auto-enlazar" — el hotlink aparece solo.
                             </span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -191,22 +168,18 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                                 rel="noopener noreferrer"
                                 data-testid={`open-product-${product.hotmart_id}`}
                                 className="inline-flex items-center justify-center gap-1.5 px-3 py-2 hard-border surface-hover text-[11px] font-medium uppercase tracking-wide"
-                                title={
-                                    isFallback
-                                        ? `Buscar "${searchKeyword}" en el marketplace de Hotmart`
-                                        : "Ver producto en Hotmart"
-                                }
+                                title="Ver producto real en Hotmart"
                             >
                                 <ArrowSquareOut size={12} weight="bold" />
                                 Ver producto
                             </a>
                             <a
-                                href={marketplaceSearchUrl}
+                                href={viewProductUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 data-testid={`open-affiliates-${product.hotmart_id}`}
                                 className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-[#09090b] text-white text-[11px] font-medium uppercase tracking-wide hover:bg-[#27272a]"
-                                title={`Abrir marketplace Hotmart buscando "${searchKeyword}"`}
+                                title="Abrir producto y afiliarse en Hotmart"
                             >
                                 <Lightning size={12} weight="bold" />
                                 Afiliarme

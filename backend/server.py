@@ -728,14 +728,6 @@ async def get_or_generate_affiliate_link(country_code: str, hotmart_id: str, for
             "tracking_id": product.get("tracking_id"),
         }
 
-    # Synthetic products can't use real API
-    if product.get("is_fallback") or str(hotmart_id).startswith(("ai_", "det_", "hm_")):
-        return {
-            "hotmart_id": hotmart_id,
-            "status": "synthetic_product",
-            "error": "Este es un producto sugerido por IA. Busca el producto real en Hotmart marketplace.",
-        }
-
     api_client = hm.HotmartAffiliateAPI()
     result = await api_client.generate_hotlink(hotmart_id)
     if result.get("status") == "generated":

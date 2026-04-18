@@ -1,8 +1,14 @@
 """
-Módulo 2: Hotmart Product Matching + Affiliate Link Generator
-- Marketplace scraper (BeautifulSoup + httpx) con fallback LLM (Claude Sonnet 4.5)
-- Affiliate API client (OAuth2 client_credentials) con manejo graceful de credenciales faltantes
-- Matching engine: scoring pain_points → productos Hotmart
+Módulo 2: Hotmart Real Product Matching + Affiliate Link Generator.
+
+Fuentes REALES de productos (cero mocks):
+1. Sincronización de afiliaciones del usuario via Hotmart Affiliate API
+   (GET /affiliation/v2/affiliates/products)
+2. Scraping del marketplace público de Hotmart extrayendo __NEXT_DATA__
+   (productos reales con productId, title, slug, rating, owner).
+
+Si ambas fuentes no producen matches para los pain points del país,
+`match_and_score` devuelve [] y el frontend muestra el estado vacío.
 """
 import os
 import re
@@ -10,17 +16,12 @@ import json
 import random
 import asyncio
 import logging
-import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional, Any
-from urllib.parse import urljoin
 
 import httpx
-from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential
-
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 
 logger = logging.getLogger("hotmart_agent.module2")
@@ -32,26 +33,24 @@ def _env(name: str) -> Optional[str]:
     return val.strip() if val else val
 
 
-SCRAPER_DELAY_MIN = 2.5
-SCRAPER_DELAY_MAX = 5.0
-AFFILIATE_API_DELAY = 1.2
+SCRAPER_DELAY_MIN = 1.5
+SCRAPER_DELAY_MAX = 3.5
 
 
 def hotmart_credentials_configured() -> bool:
     return all([_env("HOTMART_CLIENT_ID"), _env("HOTMART_CLIENT_SECRET"), _env("HOTMART_BASIC_AUTH")])
 
 
-# ========== Marketplace Scraper ==========
+# ========== Marketplace Scraper (real products from __NEXT_DATA__) ==========
 class HotmartMarketplaceScraper:
-    """Best-effort scraper — returns [] if Hotmart blocks; caller triggers LLM fallback."""
+    """Parses Hotmart's public marketplace HTML, extracting embedded Next.js JSON
+    (`__NEXT_DATA__`) to return REAL products only — no LLM-generated fakes."""
 
     def __init__(self):
-        self.base_url = "https://hotmart.com/es/marketplace/productos"
         try:
             self.ua = UserAgent()
         except Exception:
             self.ua = None
-        self._session: Optional[httpx.AsyncClient] = None
 
     def _random_ua(self) -> str:
         if self.ua:
@@ -61,237 +60,136 @@ class HotmartMarketplaceScraper:
                 pass
         return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
-    async def __aenter__(self):
-        self._session = httpx.AsyncClient(
-            timeout=20,
-            headers={"Accept-Language": "es-ES,es;q=0.9"},
-            follow_redirects=True,
+    @staticmethod
+    def _find_results_in_next_data(data: Any, depth: int = 0) -> Optional[List[Dict]]:
+        """DFS looking for any `{'results': [{'productId':...}]}` block."""
+        if depth > 10:
+            return None
+        if isinstance(data, dict):
+            results = data.get("results")
+            if isinstance(results, list) and results and isinstance(results[0], dict) and "productId" in results[0]:
+                return results
+            for v in data.values():
+                found = HotmartMarketplaceScraper._find_results_in_next_data(v, depth + 1)
+                if found:
+                    return found
+        elif isinstance(data, list):
+            for it in data:
+                found = HotmartMarketplaceScraper._find_results_in_next_data(it, depth + 1)
+                if found:
+                    return found
+        return None
+
+    @staticmethod
+    def _normalize_category(raw: Any) -> str:
+        if not raw:
+            return "General"
+        s = str(raw).replace("_", " ").strip().title()
+        return s[:80]
+
+    def _parse_product(self, raw: Dict, country_code: str, locale: str, keyword: str) -> Optional[Dict]:
+        pid = str(raw.get("productId") or "").strip()
+        if not pid:
+            return None
+        slug = str(raw.get("slug") or "").strip()
+        product_url = (
+            f"https://hotmart.com/{locale}/marketplace/productos/{slug}/{pid}"
+            if slug
+            else f"https://hotmart.com/{locale}/marketplace/productos?search={keyword.replace(' ', '+')}"
         )
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        if self._session:
-            await self._session.aclose()
-
-    async def _fetch(self, url: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
+        owner = raw.get("owner") if isinstance(raw.get("owner"), dict) else {}
+        creator = (
+            raw.get("ownerName")
+            or owner.get("name")
+            or raw.get("authorName")
+            or "Creador Hotmart"
+        )
+        rating = raw.get("rating")
         try:
-            headers = {
-                "User-Agent": self._random_ua(),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-            resp = await self._session.get(url, params=params, headers=headers)
-            if resp.status_code >= 400:
-                logger.info(f"Scraper {url} → HTTP {resp.status_code}")
-                return None
-            text_lower = resp.text.lower()
-            if any(b in text_lower for b in ["cloudflare", "captcha", "access denied", "acceso denegado"]):
-                logger.info(f"Scraper {url} → anti-bot detected")
-                return None
-            return BeautifulSoup(resp.text, "lxml")
-        except Exception as e:
-            logger.info(f"Scraper {url} → {e}")
-            return None
-
-    def _extract_card(self, card, base_url: str) -> Optional[Dict[str, Any]]:
-        try:
-            title_el = card.find("a", class_=re.compile("product-name|title|card-title", re.I))
-            if not title_el:
-                title_el = card.find("a", href=re.compile("/product/|/curso/|/ebook/"))
-            if not title_el:
-                return None
-            title = title_el.get_text(strip=True)
-            if not title:
-                return None
-            product_url = urljoin(base_url, title_el.get("href", ""))
-
-            commission = 0.0
-            commission_el = card.find(string=re.compile(r"\d+%"))
-            if commission_el:
-                m = re.search(r"(\d+(?:\.\d+)?)\s*%", str(commission_el))
-                if m:
-                    commission = float(m.group(1))
-
+            rating = float(rating) if rating is not None else 0.0
+        except Exception:
             rating = 0.0
-            rating_el = card.find(attrs={"itemprop": "ratingValue"})
-            if rating_el:
-                try:
-                    rating = float(rating_el.get("content", 0))
-                except Exception:
-                    pass
-            if not rating:
-                m = re.search(r"(\d\.\d)\s*[/(⭐]", card.get_text())
-                if m:
-                    rating = float(m.group(1))
+        reviews = raw.get("totalReviews") or 0
+        try:
+            reviews = int(reviews)
+        except Exception:
+            reviews = 0
+        language = str(raw.get("language") or raw.get("locale") or locale).lower()[:5]
 
-            category_el = card.find(class_=re.compile("category|breadcrumb|tag", re.I))
-            category = category_el.get_text(strip=True) if category_el else "General"
+        return {
+            "hotmart_id": pid,
+            "title": str(raw.get("title") or f"Producto {pid}")[:220],
+            "category": self._normalize_category(raw.get("category")),
+            # Commission % isn't public on the marketplace (only visible after affiliation);
+            # we leave it at 0 so the UI can show "—" and updates to real value after sync.
+            "commission_percent": 0.0,
+            "rating": round(max(0.0, min(5.0, rating)), 2),
+            "sales_count_30d": reviews,  # reviews as a proxy for popularity
+            "product_url": product_url,
+            "creator_name": str(creator)[:120],
+            "language": language,
+            "available_countries": [country_code, "AR", "CL", "CO", "PE", "BR", "MX", "ES"],
+            "is_fallback": False,
+            "source_keyword": keyword,
+        }
 
-            hotmart_id = card.get("data-product-id") or card.get("data-id")
-            if not hotmart_id and product_url:
-                tail = product_url.rstrip("/").split("/")[-1]
-                if tail and tail not in ("productos", "marketplace"):
-                    hotmart_id = tail
-            if not hotmart_id:
-                hotmart_id = f"hm_{abs(hash(title)) % 1_000_000}"
-
-            return {
-                "hotmart_id": str(hotmart_id),
-                "title": title[:200],
-                "category": category[:80],
-                "commission_percent": commission or 45.0,
-                "rating": rating or 4.0,
-                "sales_count_30d": random.randint(40, 250),
-                "product_url": product_url,
-                "creator_name": "Creador Hotmart",
-                "language": "es",
-                "is_fallback": False,
-            }
+    async def _search_one(self, client: httpx.AsyncClient, keyword: str, country_code: str) -> List[Dict]:
+        locale = "pt-br" if country_code == "BR" else "es"
+        accept_lang = "pt-BR,pt;q=0.9,en;q=0.5" if locale == "pt-br" else "es-ES,es;q=0.9,en;q=0.5"
+        url = f"https://hotmart.com/{locale}/marketplace/productos"
+        try:
+            resp = await client.get(
+                url,
+                params={"search": keyword},
+                headers={
+                    "User-Agent": self._random_ua(),
+                    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                    "Accept-Language": accept_lang,
+                },
+            )
         except Exception as e:
-            logger.debug(f"Card parse error: {e}")
-            return None
+            logger.info(f"🕷️  Scraper fetch error '{keyword}' ({country_code}): {e}")
+            return []
 
-    async def search(self, keywords: List[str], country_code: str, min_commission: float = 40.0) -> List[Dict]:
+        if resp.status_code != 200:
+            logger.info(f"🕷️  Scraper '{keyword}' ({country_code}) → HTTP {resp.status_code}")
+            return []
+
+        match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text, re.S)
+        if not match:
+            logger.info(f"🕷️  '{keyword}' ({country_code}) — no __NEXT_DATA__ block")
+            return []
+
+        try:
+            data = json.loads(match.group(1))
+        except Exception as e:
+            logger.info(f"🕷️  NEXT_DATA parse error: {e}")
+            return []
+
+        raw_results = self._find_results_in_next_data(data) or []
         products: List[Dict] = []
-        seen_ids = set()
-        async with self:
-            for kw in keywords[:3]:
-                logger.info(f"🕷️  Scraping Hotmart '{kw}' ({country_code})")
-                soup = await self._fetch(self.base_url, {"search": kw})
-                if not soup:
-                    await asyncio.sleep(random.uniform(SCRAPER_DELAY_MIN, SCRAPER_DELAY_MAX))
-                    continue
-                cards = soup.find_all("div", class_=re.compile("card|product-item|grid-item", re.I))
-                if not cards:
-                    cards = soup.find_all("a", href=re.compile("/product/|/curso/|/ebook/"))[:20]
-                for c in cards:
-                    p = self._extract_card(c, self.base_url)
-                    if not p:
-                        continue
-                    if p["commission_percent"] < min_commission:
-                        continue
-                    if p["hotmart_id"] in seen_ids:
-                        continue
-                    seen_ids.add(p["hotmart_id"])
-                    p["available_countries"] = ["AR", "CL", "CO", "PE", "BR", "MX", "ES"]
-                    p["source_keyword"] = kw
-                    products.append(p)
-                await asyncio.sleep(random.uniform(SCRAPER_DELAY_MIN, SCRAPER_DELAY_MAX))
-        logger.info(f"🕷️  Scraping returned {len(products)} products")
+        for raw in raw_results:
+            p = self._parse_product(raw, country_code, locale, keyword)
+            if p:
+                products.append(p)
+        logger.info(f"🕷️  '{keyword}' ({country_code}) → {len(products)} real products")
         return products
 
-
-# ========== LLM Fallback (Claude Sonnet 4.5) ==========
-async def llm_generate_products(pain_points: List[Dict[str, Any]], country_code: str, country_name: str, limit: int = 8) -> List[Dict]:
-    """Generate plausible Hotmart-style products using Claude when scraping fails."""
-    emergent_key = _env("EMERGENT_LLM_KEY")
-    if not emergent_key:
-        return _deterministic_products(pain_points, country_code, limit)
-
-    pp_text = "\n".join(
-        f"- {p['keyword']} → dolor: {p.get('pain_point', '')[:120]} (intención {p.get('commercial_intent', 'Media')})"
-        for p in pain_points[:6]
-    )
-
-    system_message = (
-        "Eres un experto senior en marketing de afiliados en Hotmart y producción de cursos digitales "
-        "para el mercado latinoamericano. Tu misión: proponer productos digitales plausibles que resolverían "
-        "necesidades específicas detectadas en un país. Reglas estrictas:\n"
-        "1. Responde SOLO con un array JSON válido (sin markdown, sin ```json).\n"
-        "2. Cada producto debe tener: hotmart_id (string único sintético empezando con 'ai_'), "
-        "title (atractivo, español o portugués según país), category (categoría Hotmart real: "
-        "'Educación', 'Negocios y Carrera', 'Finanzas', 'Salud y Deportes', 'Desarrollo Personal', "
-        "'Marketing Digital', 'Idiomas', 'Espiritualidad'), commission_percent (entre 40 y 75), "
-        "rating (entre 4.0 y 4.9), sales_count_30d (entre 30 y 400), creator_name (nombre ficticio creíble), "
-        "product_url (formato: 'https://go.hotmart.com/placeholder/{hotmart_id}').\n"
-        "3. Cada título debe atacar un dolor específico de los listados."
-    )
-
-    user_prompt = (
-        f"País: {country_name} ({country_code})\n"
-        f"Cantidad de productos a generar: {limit}\n\n"
-        f"Dolores detectados por el Módulo 1:\n{pp_text}\n\n"
-        "Devuelve el array JSON."
-    )
-
-    try:
-        chat = LlmChat(
-            api_key=emergent_key,
-            session_id=f"products-{country_code}-{uuid.uuid4().hex[:8]}",
-            system_message=system_message,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-        resp = await chat.send_message(UserMessage(text=user_prompt))
-        return _parse_llm_products(resp, country_code, limit)
-    except Exception as e:
-        logger.warning(f"LLM product generation failed: {e}")
-        return _deterministic_products(pain_points, country_code, limit)
-
-
-def _parse_llm_products(response: str, country_code: str, limit: int) -> List[Dict]:
-    if not isinstance(response, str):
-        response = str(response)
-    # Extract JSON array
-    match = re.search(r"\[[\s\S]*\]", response)
-    raw = match.group(0) if match else response
-    try:
-        data = json.loads(raw)
-    except Exception:
-        return []
-    if not isinstance(data, list):
-        return []
-
-    out: List[Dict] = []
-    for idx, item in enumerate(data[:limit]):
-        if not isinstance(item, dict):
-            continue
-        hid = str(item.get("hotmart_id") or f"ai_{uuid.uuid4().hex[:10]}")
-        try:
-            commission = float(item.get("commission_percent", 50))
-        except Exception:
-            commission = 50.0
-        try:
-            rating = float(item.get("rating", 4.3))
-        except Exception:
-            rating = 4.3
-        try:
-            sales = int(item.get("sales_count_30d", 80))
-        except Exception:
-            sales = 80
-        out.append({
-            "hotmart_id": hid,
-            "title": str(item.get("title", "Producto sin título"))[:200],
-            "category": str(item.get("category", "General"))[:80],
-            "commission_percent": max(0.0, min(90.0, commission)),
-            "rating": max(0.0, min(5.0, rating)),
-            "sales_count_30d": max(0, min(2000, sales)),
-            "product_url": str(item.get("product_url", f"https://hotmart.com/es/marketplace/{hid}"))[:500],
-            "creator_name": str(item.get("creator_name", "Creador Hotmart"))[:120],
-            "language": "es" if country_code != "BR" else "pt",
-            "available_countries": [country_code],
-            "is_fallback": True,
-        })
-    return out
-
-
-def _deterministic_products(pain_points: List[Dict[str, Any]], country_code: str, limit: int) -> List[Dict]:
-    """Last-resort fallback without LLM."""
-    out = []
-    for i, p in enumerate(pain_points[:limit]):
-        kw = p["keyword"]
-        out.append({
-            "hotmart_id": f"det_{country_code}_{i}_{abs(hash(kw)) % 10000}",
-            "title": f"Masterclass: {kw.title()} desde cero",
-            "category": "Educación",
-            "commission_percent": 55.0,
-            "rating": 4.3,
-            "sales_count_30d": 80,
-            "product_url": f"https://hotmart.com/es/marketplace/search?q={kw.replace(' ', '+')}",
-            "creator_name": "Producto sugerido",
-            "language": "es" if country_code != "BR" else "pt",
-            "available_countries": [country_code],
-            "is_fallback": True,
-        })
-    return out
+    async def search(self, keywords: List[str], country_code: str, min_commission: float = 0.0) -> List[Dict]:
+        """Search marketplace for each keyword, dedupe by productId, return real products."""
+        seen: set = set()
+        out: List[Dict] = []
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            for kw in keywords[:5]:
+                products = await self._search_one(client, kw, country_code)
+                for p in products:
+                    if p["hotmart_id"] in seen:
+                        continue
+                    seen.add(p["hotmart_id"])
+                    out.append(p)
+                await asyncio.sleep(random.uniform(SCRAPER_DELAY_MIN, SCRAPER_DELAY_MAX))
+        logger.info(f"🕷️  Scraper total (dedup) for {country_code}: {len(out)} real products")
+        return out
 
 
 # ========== Affiliate API Client ==========
@@ -364,10 +262,10 @@ class HotmartAffiliateAPI:
                 return {
                     "error": desc,
                     "status": "unauthorized_client",
-                    "hint": "Tu app Hotmart necesita scopes de afiliación. Revisa en developers.hotmart.com > Tu App > Permissions.",
+                    "hint": "Tu app Hotmart necesita scopes de afiliación.",
                 }
             if resp.status_code == 404:
-                return {"error": "Producto no encontrado o endpoint no disponible", "status": "not_found"}
+                return {"error": "Producto no afiliable o no existe", "status": "not_found"}
             if resp.status_code >= 400:
                 try:
                     body = resp.json()
@@ -388,7 +286,6 @@ class HotmartAffiliateAPI:
             }
 
     async def test_connection(self) -> Dict[str, Any]:
-        """Verifica credenciales + permisos llamando al OAuth y a un endpoint de prueba."""
         if not hotmart_credentials_configured():
             return self.credentials_missing_response()
         try:
@@ -406,7 +303,6 @@ class HotmartAffiliateAPI:
         except Exception as e:
             return {"status": "auth_failed", "error": str(e)}
 
-        # Token OK — probe scopes by calling a permission-gated endpoint
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{self.API_URL}/payments/api/v1/sales/history",
@@ -433,14 +329,11 @@ class HotmartAffiliateAPI:
             "scopes_ok": scopes_ok,
             "scope_detail": scope_detail,
             "next_step": None if scopes_ok else (
-                "Tu token OAuth funciona, pero tu app no tiene permisos de afiliación. "
-                "Ve a developers.hotmart.com > Tu App > Permissions y activa los scopes "
-                "'Affiliation Management' y 'Sales History'."
+                "Tu token OAuth funciona pero tu app no tiene scopes de afiliación."
             ),
         }
 
     async def _authed_get(self, path: str, params: Optional[Dict] = None) -> Dict[str, Any]:
-        """Helper for authenticated GET requests to Hotmart API."""
         if not hotmart_credentials_configured():
             return {"error": "credentials_missing", "status": "credentials_missing"}
         try:
@@ -460,7 +353,6 @@ class HotmartAffiliateAPI:
                 except Exception:
                     err = f"HTTP {resp.status_code}"
                 return {"status": f"api_error_{resp.status_code}", "error": err}
-            # Handle empty body (common for empty lists)
             if not resp.content or not resp.text.strip():
                 return {"status": "ok", "items": [], "page_info": {"total_results": 0}}
             try:
@@ -469,7 +361,6 @@ class HotmartAffiliateAPI:
                 return {"status": "ok", "items": [], "page_info": {"total_results": 0}, "note": "empty_body"}
 
     async def list_my_affiliations(self, max_results: int = 50) -> Dict[str, Any]:
-        """Products the user is already affiliated to on Hotmart."""
         return await self._authed_get(
             "/affiliation/v2/affiliates/products",
             {"max_results": max_results},
@@ -492,11 +383,7 @@ class HotmartAffiliateAPI:
 
 
 async def sync_my_affiliations(db) -> Dict[str, Any]:
-    """Fetch user's real Hotmart affiliations and upsert into MongoDB.
-
-    Returns: {synced: int, items: List[normalized affiliations]}.
-    Each affiliation contains {hotmart_id, title, category, hotlink, commission_percent, ...}.
-    """
+    """Fetch user's real Hotmart affiliations and upsert into MongoDB."""
     api = HotmartAffiliateAPI()
     result = await api.list_my_affiliations(max_results=200)
     if result.get("status") != "ok":
@@ -567,12 +454,10 @@ async def sync_my_affiliations(db) -> Dict[str, Any]:
 
 
 def _text_match_score(title: str, category: str, keyword: str) -> float:
-    """Fuzzy overlap between product text and a keyword."""
     text = f"{title} {category}".lower()
     kw = keyword.lower()
     if kw in text:
         return 1.0
-    # Word overlap
     kw_words = [w for w in kw.split() if len(w) > 3]
     if not kw_words:
         return 0.0
@@ -581,7 +466,6 @@ def _text_match_score(title: str, category: str, keyword: str) -> float:
 
 
 async def match_real_affiliations_to_trends(db, country_code: str, pain_keywords: List[str]) -> List[Dict]:
-    """Return user's real affiliated products that match pain points from Module 1."""
     cursor = db.hotmart_affiliations.find({}, {"_id": 0})
     affiliations = await cursor.to_list(length=500)
     if not affiliations:
@@ -632,10 +516,14 @@ async def match_real_affiliations_to_trends(db, country_code: str, pain_keywords
     return matched
 
 
-# ========== Matching Engine ==========
+# ========== Matching Engine (REAL products only) ==========
 async def match_and_score(db, country_code: str, country_name: str, limit: int = 10, auto_links: bool = True) -> List[Dict]:
-    """Pipeline completo: pain_points → real affiliations + scraping/LLM → scoring → upsert MongoDB."""
-    # 1. Pull trends from module 1
+    """Pipeline real-only: pain_points → afiliaciones del usuario + marketplace scraping → scoring → upsert.
+
+    NO genera productos con LLM. Si las dos fuentes reales no devuelven nada,
+    retorna [] y el frontend muestra empty state.
+    """
+    # 1. Pull trends (pain points) for the country
     cursor = db.trends.find(
         {"country_code": country_code, "commercial_intent": {"$in": ["Alta", "Media"]}},
         {"_id": 0},
@@ -646,32 +534,34 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
 
     pain_keywords = [t["keyword"] for t in trends]
 
-    # 2. Auto-sync user's real Hotmart affiliations (if creds available)
-    real_products: List[Dict] = []
+    # 2. Sync user's affiliations (if creds) and match
+    real_affiliations: List[Dict] = []
     if hotmart_credentials_configured():
         try:
             await sync_my_affiliations(db)
-            real_products = await match_real_affiliations_to_trends(db, country_code, pain_keywords)
-            if real_products:
-                logger.info(f"🔗 {len(real_products)} real affiliations matched for {country_code}")
+            real_affiliations = await match_real_affiliations_to_trends(db, country_code, pain_keywords)
+            if real_affiliations:
+                logger.info(f"🔗 {len(real_affiliations)} user affiliations matched for {country_code}")
         except Exception as e:
             logger.warning(f"Affiliation sync failed: {e}")
 
-    # 3. Discovery: scraping + LLM fallback for products to suggest
-    raw_products: List[Dict] = []
-    if len(real_products) < limit:
-        scraper = HotmartMarketplaceScraper()
-        raw_products = await scraper.search(pain_keywords, country_code, min_commission=40.0)
-        if not raw_products:
-            logger.info(f"⚠️ Scraping vacío para {country_code}. Fallback LLM.")
-            raw_products = await llm_generate_products(trends, country_code, country_name, limit=limit)
+    # 3. Marketplace scraping (REAL products only)
+    scraped: List[Dict] = []
+    if len(real_affiliations) < limit:
+        try:
+            scraper = HotmartMarketplaceScraper()
+            scraped = await scraper.search(pain_keywords, country_code)
+        except Exception as e:
+            logger.warning(f"Marketplace scraping failed: {e}")
 
-    # 4. Score discovery products
-    scored_discovery: List[Dict] = []
-    for p in raw_products:
-        vol = p.get("sales_count_30d", 50)
-        profitability = (p["commission_percent"] * p["rating"] * (1 + vol / 500)) / 100
-        profitability = round(min(100.0, profitability * 3), 2)
+    # 4. Score scraped products
+    scored_scraped: List[Dict] = []
+    for p in scraped:
+        commission = p.get("commission_percent", 0.0)
+        rating = p.get("rating", 0.0)
+        vol = p.get("sales_count_30d", 0)
+        # Profitability proxy: rating + popularity (commission is unknown at scrape time)
+        profitability = round(min(100.0, (rating * 15) + min(30.0, vol / 10)), 2)
 
         text = f"{p['title']} {p.get('category', '')}".lower()
         matches = [kw for kw in pain_keywords if kw.lower() in text]
@@ -681,11 +571,12 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
                 kw_words = set(kw.lower().split())
                 if len(kw_words & words) >= max(1, len(kw_words) - 1):
                     matches.append(kw)
-        relevance = min(100.0, (len(matches) / max(1, len(pain_keywords))) * 100 + (profitability * 0.3))
+        relevance = min(100.0, (len(matches) / max(1, len(pain_keywords))) * 100 + profitability * 0.3)
         relevance = round(relevance, 2)
 
-        scored_discovery.append({
+        scored_scraped.append({
             **p,
+            "commission_percent": commission,
             "country_code": country_code,
             "is_my_affiliation": False,
             "matched_pain_points": matches,
@@ -700,35 +591,28 @@ async def match_and_score(db, country_code: str, country_name: str, limit: int =
             "fetched_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    # 5. Merge: real affiliations ALWAYS first, then discovery. Dedupe by hotmart_id.
-    seen = {p["hotmart_id"] for p in real_products}
-    merged = list(real_products)
-    for p in scored_discovery:
+    # 5. Merge: user affiliations first, then marketplace scraping. Dedupe by hotmart_id.
+    seen = {p["hotmart_id"] for p in real_affiliations}
+    merged = list(real_affiliations)
+    for p in scored_scraped:
         if p["hotmart_id"] not in seen:
             merged.append(p)
             seen.add(p["hotmart_id"])
 
     merged.sort(
         key=lambda x: (
-            1 if x.get("is_my_affiliation") else 0,  # real affiliations first
+            1 if x.get("is_my_affiliation") else 0,
             x["relevance_score"] * 0.6 + x["profitability_score"] * 0.4,
         ),
         reverse=True,
     )
     top = merged[:limit]
 
-    # 6. For discovery products (not user affiliations), set credentials_missing status if applicable
-    has_creds = hotmart_credentials_configured()
-    for p in top:
-        if p.get("is_my_affiliation"):
-            # Already has real hotlink, skip
-            continue
-        if auto_links and not has_creds:
-            p["affiliate_status"] = "credentials_missing"
-        elif str(p["hotmart_id"]).startswith(("ai_", "det_", "hm_")):
-            p["affiliate_status"] = "synthetic_product"
+    # 6. Clear previous cached products for this country before upserting new ones
+    #    to avoid stale mocks from earlier runs.
+    await db.products.delete_many({"country_code": country_code})
 
-    # 7. Upsert
+    # 7. Upsert fresh products
     for p in top:
         await db.products.update_one(
             {"hotmart_id": p["hotmart_id"], "country_code": country_code},
