@@ -92,13 +92,17 @@ class HotmartMarketplaceScraper:
         if not pid:
             return None
         slug = str(raw.get("slug") or "").strip()
-        product_url = (
-            f"https://hotmart.com/{locale}/marketplace/productos/{slug}/{pid}"
-            if slug
-            else f"https://hotmart.com/{locale}/marketplace/productos?search={keyword.replace(' ', '+')}"
-        )
+        # REAL marketplace URL: /productos/{slug}/{producerReferenceCode}?sck=HOTMART_SITE
+        # producerReferenceCode (e.g. "W22948940V") is the public-facing code,
+        # NOT productId. Using slug+productId returns 404 on the client SPA.
+        ref_code = str(raw.get("producerReferenceCode") or "").strip()
+        if slug and ref_code:
+            product_url = f"https://hotmart.com/{locale}/marketplace/productos/{slug}/{ref_code}?sck=HOTMART_SITE"
+        else:
+            product_url = f"https://hotmart.com/{locale}/marketplace/productos?search={keyword.replace(' ', '+')}"
+
         owner = raw.get("owner") if isinstance(raw.get("owner"), dict) else {}
-        creator = (
+        creator_name = (
             raw.get("ownerName")
             or owner.get("name")
             or raw.get("authorName")
@@ -116,20 +120,46 @@ class HotmartMarketplaceScraper:
             reviews = 0
         language = str(raw.get("language") or raw.get("locale") or locale).lower()[:5]
 
+        # Rich payload for Module 3 (landing page generator)
+        creator_page = owner.get("creatorPage") or ""
+        avatar = raw.get("finalAvatar") or raw.get("avatar") or ""
+        tags = [str(t)[:60] for t in (raw.get("tags") or []) if t][:12]
+
         return {
             "hotmart_id": pid,
+            "producer_reference_code": ref_code,
+            "offer_code": str(raw.get("offer") or "").strip(),
+            "slug": slug,
             "title": str(raw.get("title") or f"Producto {pid}")[:220],
+            "description": str(raw.get("description") or "")[:4000],
             "category": self._normalize_category(raw.get("category")),
+            "format": str(raw.get("format") or "").lower()[:60],
             # Commission % isn't public on the marketplace (only visible after affiliation);
             # we leave it at 0 so the UI can show "—" and updates to real value after sync.
             "commission_percent": 0.0,
             "rating": round(max(0.0, min(5.0, rating)), 2),
+            "total_reviews": reviews,
             "sales_count_30d": reviews,  # reviews as a proxy for popularity
+            "total_classes": int(raw.get("totalClasses") or 0),
+            "total_hours": float(raw.get("totalHours") or 0.0),
             "product_url": product_url,
-            "creator_name": str(creator)[:120],
+            "avatar_url": avatar,
+            "video_link": str(raw.get("videoLink") or "")[:500],
+            "creator_name": str(creator_name)[:120],
+            "creator_page": creator_page,
+            "creator_slug": owner.get("slug") or "",
+            "creator_public_id": owner.get("publicId") or "",
+            "tags": tags,
+            "ingress_date": str(raw.get("ingressDate") or "")[:32],
+            "sales_enabled": bool(raw.get("salesEnabled", True)),
+            "has_community": bool(raw.get("hasCommunity", False)),
             "language": language,
+            "locale": str(raw.get("locale") or locale).lower()[:5],
             "available_countries": [country_code, "AR", "CL", "CO", "PE", "BR", "MX", "ES"],
+            "is_real": True,
+            "is_mockup": False,
             "is_fallback": False,
+            "source": "hotmart_marketplace_scraping",
             "source_keyword": keyword,
         }
 

@@ -26,7 +26,20 @@ Sistema de agente que investiga necesidades reales en Sudamérica (AR, CL, CO, P
 - Orquestador background con delays éticos; fallback heurístico si LLM falla.
 - Upsert `(country_code, keyword)` sin duplicados.
 
-### Módulo 2 — Hotmart 100% REAL (iteración 2026-04-18)
+### Módulo 2 — Datos ricos para Módulo 3 (iteración 2026-04-18 #2)
+- **Bug fix crítico**: el URL de "Ver producto" usaba `productId` y daba 404. Hotmart usa `producerReferenceCode` (ej. `W22948940V`) en la URL pública. Ahora: `https://hotmart.com/{locale}/marketplace/productos/{slug}/{producerReferenceCode}?sck=HOTMART_SITE` → HTTP 200 real.
+- **Scraper enriquecido**: extrae del `__NEXT_DATA__` todos los campos útiles para Módulo 3 (landing page):
+  - `description` (texto completo), `avatar_url`, `video_link`
+  - `total_classes`, `total_hours`, `format` (online_services, ebook, etc.)
+  - `tags` (12 etiquetas Hotmart)
+  - `owner.creatorPage`, `creator_slug`, `creator_public_id`
+  - `offer_code` (para generar hotlinks posteriormente), `producer_reference_code` (para URLs públicas)
+  - `ingress_date`, `total_reviews`, `sales_enabled`, `has_community`
+  - Flags: `is_real: true`, `is_mockup: false`, `source: "hotmart_marketplace_scraping"`
+- **ProductCard enriquecido**: muestra avatar, creator clickeable, formato + clases + horas + reseñas, descripción colapsable y tags Hotmart.
+- Verificado: 50 productos reales en los 5 países, 100% con `producer_reference_code` válido y URLs que devuelven HTTP 200.
+
+### Módulo 2 — Hotmart 100% REAL (iteración previa 2026-04-18 #1)
 - **Cero productos mockup/IA**. Eliminadas funciones `llm_generate_products`, `_deterministic_products` y la generación de IDs sintéticos `ai_*`, `det_*`, `hm_*`.
 - **Nuevo scraper real del marketplace**: parsea `__NEXT_DATA__` del HTML público de `hotmart.com/{es|pt-br}/marketplace/productos?search={kw}` y extrae productos con `productId`, `slug`, `rating`, `totalReviews`, `ownerName`, `category` reales.
 - `match_and_score` ahora:

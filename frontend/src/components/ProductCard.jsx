@@ -1,27 +1,32 @@
-import React from "react";
+import React, { useState } from "react";
 import {
     Copy,
     ArrowSquareOut,
     Star,
     Lightning,
+    Clock,
+    VideoCamera,
+    CaretDown,
+    CaretUp,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function ProductCard({ product, countryCode, index = 0 }) {
+    const [expanded, setExpanded] = useState(false);
     const isMyAffiliation = product.is_my_affiliation;
     const hasLink =
         product.affiliate_link &&
         ["generated", "cached", "manual"].includes(product.affiliate_status);
 
-    // Marketplace search URL using the first matched pain point (used by "Afiliarme"
-    // and as a safety fallback for "Ver producto" if the real URL is missing).
+    // Real marketplace URL already built by backend (slug + producerReferenceCode).
+    // Fallback: marketplace search with first matched pain point.
     const searchKeyword =
         (product.matched_pain_points && product.matched_pain_points[0]) ||
         product.title ||
         "";
     const marketLocale = countryCode === "BR" ? "pt-br" : "es";
-    const marketplaceSearchUrl = `https://hotmart.com/${marketLocale}/marketplace/productos?search=${encodeURIComponent(searchKeyword)}`;
-    const viewProductUrl = product.product_url || marketplaceSearchUrl;
+    const fallbackSearchUrl = `https://hotmart.com/${marketLocale}/marketplace/productos?search=${encodeURIComponent(searchKeyword)}`;
+    const viewProductUrl = product.product_url || fallbackSearchUrl;
 
     const handleCopy = async () => {
         if (!product.affiliate_link) return;
@@ -36,6 +41,9 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
     const scoreColor = (s) =>
         s >= 80 ? "#DC2626" : s >= 60 ? "#D97706" : "#2563EB";
     const commission = Number(product.commission_percent) || 0;
+    const totalClasses = Number(product.total_classes) || 0;
+    const totalHours = Number(product.total_hours) || 0;
+    const description = String(product.description || "").trim();
 
     return (
         <article
@@ -43,7 +51,18 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
             style={{ animationDelay: `${index * 40}ms` }}
             className="widget-enter hard-border surface p-5 flex flex-col gap-4"
         >
-            <header className="flex items-start justify-between gap-3">
+            <header className="flex items-start gap-3">
+                {product.avatar_url && (
+                    <img
+                        src={product.avatar_url}
+                        alt={product.title}
+                        className="w-14 h-14 hard-border object-cover flex-shrink-0"
+                        loading="lazy"
+                        onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                        }}
+                    />
+                )}
                 <div className="flex-1 min-w-0">
                     <div className="overline mb-1">{product.category}</div>
                     <h4
@@ -52,27 +71,38 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                     >
                         {product.title}
                     </h4>
-                    <div className="text-xs text-[#52525B] mt-1">
-                        por {product.creator_name}
+                    <div className="text-xs text-[#52525B] mt-1 truncate">
+                        por{" "}
+                        {product.creator_page ? (
+                            <a
+                                href={product.creator_page}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline hover:text-[#09090b]"
+                                data-testid={`creator-link-${product.hotmart_id}`}
+                            >
+                                {product.creator_name}
+                            </a>
+                        ) : (
+                            product.creator_name
+                        )}
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    {isMyAffiliation && (
-                        <span
-                            data-testid={`my-affiliation-badge-${product.hotmart_id}`}
-                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold tracking-widest"
-                            style={{
-                                background: "#DCFCE7",
-                                color: "#166534",
-                                border: "1px solid #86EFAC",
-                            }}
-                            title="Ya estás afiliado a este producto"
-                        >
-                            <Lightning size={9} weight="fill" />
-                            Mi afiliación
-                        </span>
-                    )}
-                </div>
+                {isMyAffiliation && (
+                    <span
+                        data-testid={`my-affiliation-badge-${product.hotmart_id}`}
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-semibold tracking-widest flex-shrink-0"
+                        style={{
+                            background: "#DCFCE7",
+                            color: "#166534",
+                            border: "1px solid #86EFAC",
+                        }}
+                        title="Ya estás afiliado a este producto"
+                    >
+                        <Lightning size={9} weight="fill" />
+                        Mi afiliación
+                    </span>
+                )}
             </header>
 
             <div className="grid grid-cols-3 gap-3 hard-border-t pt-3">
@@ -101,6 +131,52 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                 </div>
             </div>
 
+            {(totalClasses > 0 || totalHours > 0 || product.format) && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[#52525B]">
+                    {product.format && (
+                        <span className="flex items-center gap-1">
+                            <VideoCamera size={11} weight="bold" />
+                            {product.format.replace(/_/g, " ")}
+                        </span>
+                    )}
+                    {totalClasses > 0 && (
+                        <span className="mono">{totalClasses} clases</span>
+                    )}
+                    {totalHours > 0 && (
+                        <span className="flex items-center gap-1">
+                            <Clock size={11} weight="bold" />
+                            {totalHours.toFixed(1)}h
+                        </span>
+                    )}
+                    {product.total_reviews > 0 && (
+                        <span className="mono">{product.total_reviews} reseñas</span>
+                    )}
+                </div>
+            )}
+
+            {description && (
+                <div>
+                    <button
+                        onClick={() => setExpanded(!expanded)}
+                        data-testid={`toggle-description-${product.hotmart_id}`}
+                        className="overline flex items-center gap-1 hover:text-[#09090b]"
+                    >
+                        Descripción
+                        {expanded ? (
+                            <CaretUp size={10} weight="bold" />
+                        ) : (
+                            <CaretDown size={10} weight="bold" />
+                        )}
+                    </button>
+                    <p
+                        className={`text-[11px] text-[#52525B] leading-relaxed mt-1 ${expanded ? "" : "line-clamp-3"}`}
+                        data-testid={`product-description-${product.hotmart_id}`}
+                    >
+                        {description}
+                    </p>
+                </div>
+            )}
+
             {product.matched_pain_points && product.matched_pain_points.length > 0 && (
                 <div>
                     <div className="overline mb-1.5">Dolores que resuelve</div>
@@ -111,6 +187,22 @@ export default function ProductCard({ product, countryCode, index = 0 }) {
                                 className="text-[11px] px-2 py-0.5 hard-border"
                             >
                                 {pp}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {product.tags && product.tags.length > 0 && (
+                <div>
+                    <div className="overline mb-1.5">Tags Hotmart</div>
+                    <div className="flex flex-wrap gap-1">
+                        {product.tags.slice(0, 6).map((t) => (
+                            <span
+                                key={t}
+                                className="text-[10px] px-2 py-0.5 bg-[#F4F4F5] text-[#52525B]"
+                            >
+                                #{t}
                             </span>
                         ))}
                     </div>
